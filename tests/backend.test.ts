@@ -195,6 +195,10 @@ describe("transactional event rules", () => {
       (await t.query(anyApi.guest.participation, { token: "guest", eventId }))
         .used,
     ).toBe(1);
+    expect(
+      (await t.query(anyApi.guest.participation, { token: "guest", eventId }))
+        .votedTracks,
+    ).toMatchObject([{ trackId: "song0", title: "Song 0", archived: true }]);
     await admin.mutation(anyApi.admin.archive, {
       eventId,
       requestId: r._id,
@@ -204,6 +208,10 @@ describe("transactional event rules", () => {
       (await t.query(anyApi.guest.leaderboard, { eventId, limit: 50 }))[0]
         .votes,
     ).toBe(1);
+    expect(
+      (await t.query(anyApi.guest.participation, { token: "guest", eventId }))
+        .votedTracks,
+    ).toMatchObject([{ trackId: "song0", archived: false }]);
   });
   it("rejects expired undo and forged administrator credentials", async () => {
     const { t, admin, eventId } = await setup();

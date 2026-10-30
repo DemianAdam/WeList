@@ -1,4 +1,33 @@
 import { test, expect } from "@playwright/test";
+test("guests can see their votes, including a song removed and restored by the DJ", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/");
+  const votes = page.getByRole("region", { name: "Tus votos" });
+  await expect(votes).toContainText("Tus canciones elegidas aparecerán aquí.");
+  await page.getByRole("button", { name: "Votar Blinding Lights" }).click();
+  await page.getByRole("link", { name: "@welist.dj" }).click();
+  await page.getByRole("link", { name: "@welist.club" }).click();
+  await page.getByRole("button", { name: "Continuar", exact: true }).click();
+  await expect(votes).toContainText("Blinding Lights");
+  await expect(votes).toContainText("The Weeknd");
+  await page.getByRole("button", { name: "Votar Levitating" }).click();
+  await expect(votes).toContainText("Levitating");
+  await page.getByLabel("Buscar canción o artista").fill("unrelated search");
+  await expect(votes).toContainText("Blinding Lights");
+  await page.reload();
+  await expect(votes).toContainText("Blinding Lights");
+  await expect(votes).toContainText("Levitating");
+  const booth = await context.newPage();
+  await booth.goto("/dj-booth");
+  await booth.getByLabel("Contraseña", { exact: true }).fill("welist-demo");
+  await booth.getByRole("button", { name: "Entrar a la cabina" }).click();
+  await booth.getByRole("button", { name: "Quitar Blinding Lights" }).click();
+  await expect(votes).toContainText("Retirada por el DJ · Voto utilizado");
+  await booth.getByRole("button", { name: "Deshacer", exact: true }).click();
+  await expect(votes).not.toContainText("Retirada por el DJ");
+});
 test("an exhausted budget in another tab prevents the pending vote", async ({
   page,
   context,
@@ -326,5 +355,6 @@ test("catalog requests spend one vote and an old tab acknowledges the next event
   ).toBeVisible();
   await page.getByRole("button", { name: "Entrar al evento" }).click();
   await expect(page.getByText("Te quedan 3 de 3 votos")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Tus votos" })).toContainText("Tus canciones elegidas aparecerán aquí.");
   await expect(page.getByLabel("Buscar canción o artista")).toHaveValue("");
 });

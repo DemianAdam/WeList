@@ -22,6 +22,18 @@ export function createMockAdapter(): Adapter {
   const listeners = new Set<() => void>();
   let snapshot: Snapshot;
   const attempts = new Map<string, { count: number; reset: number }>();
+  function participationFor(state: State, eventId: string) {
+    const participation =
+      state.participation[eventId + guest] ?? emptyParticipation;
+    const event = state.events.find((e) => e.id === eventId);
+    return {
+      ...participation,
+      votedTracks: participation.votes.flatMap((id) => {
+        const track = event?.tracks.find((t) => t.id === id);
+        return track ? [track] : [];
+      }),
+    };
+  }
   function refresh() {
     const state = read();
     const event = state.events.find((e) => e.id === state.current) ?? null;
@@ -31,8 +43,7 @@ export function createMockAdapter(): Adapter {
     const expiry = Number(sessionStorage.getItem(ADMIN));
     snapshot = {
       event,
-      participation:
-        state.participation[state.current + guest] ?? emptyParticipation,
+      participation: participationFor(state, state.current),
       admin: expiry > Date.now(),
       authLoading: false,
       authError: null,
@@ -182,7 +193,7 @@ export function createMockAdapter(): Adapter {
         !state.events.find((e) => e.id === eventId)?.live
       )
         throw new CommandError("EVENT_CLOSED", "El evento terminó.");
-      return state.participation[eventId + guest] ?? emptyParticipation;
+      return participationFor(state, eventId);
     },
     search: async (eventId, term) => {
       const event = read().events.find((e) => e.id === eventId);

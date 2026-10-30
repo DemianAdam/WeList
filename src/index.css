@@ -512,6 +512,39 @@ dialog::backdrop {
   font-size: 10px;
   color: #ff304f;
 }
+.my-votes {
+  margin: 24px 0;
+}
+.my-votes-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.my-votes-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #2b171b;
+}
+.my-votes-list strong,
+.my-votes-list div span {
+  display: block;
+}
+.my-votes-list div span {
+  color: #aaa3b7;
+  font-size: 13px;
+  margin-top: 4px;
+}
+.vote-status {
+  color: #ff304f;
+  text-align: right;
+  font-size: 12px;
+}
+.vote-status.removed {
+  color: #aaa3b7;
+}
 .cover {
   object-fit: cover;
 }

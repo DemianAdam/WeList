@@ -105,7 +105,7 @@ export function createConvexAdapter(
     title: t.title,
     artist: t.artist,
     votes: t.votes ?? 0,
-    archived: t.archived ? t.removedAt : undefined,
+    archived: t.archived ? (t.removedAt ?? 1) : undefined,
     artwork: t.artwork,
     url: t.url,
   });
@@ -134,7 +134,13 @@ export function createConvexAdapter(
           makeFunctionReference<"query">("guest:participation"),
           { eventId, token },
           (p: any) => {
-            snapshot = { ...snapshot, participation: p };
+            snapshot = {
+              ...snapshot,
+              participation: {
+                ...p,
+                votedTracks: (p.votedTracks ?? []).map(track),
+              },
+            };
             emit();
           },
           () => {
@@ -298,10 +304,14 @@ export function createConvexAdapter(
     getParticipation: async (eventId) => {
       if (!token)
         throw Error("No se pudo comprobar la sesión. Vuelve a intentarlo.");
-      return await new ConvexHttpClient(url).query(
+      const participation = await new ConvexHttpClient(url).query(
         makeFunctionReference<"query">("guest:participation"),
         { eventId, token },
       );
+      return {
+        ...participation,
+        votedTracks: (participation.votedTracks ?? []).map(track),
+      };
     },
     setAuthState: (value, loading) => {
       snapshot = { ...snapshot, authLoading: loading || (value && !admin) };

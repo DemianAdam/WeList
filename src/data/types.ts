@@ -28,6 +28,7 @@ export type Participation = {
   clicks: number[];
   unlocked: boolean;
   votes: string[];
+  votedTracks: Track[];
 };
 export type Metrics = {
   participants: number;
@@ -51,6 +52,7 @@ export const emptyParticipation: Participation = {
   clicks: [],
   unlocked: false,
   votes: [],
+  votedTracks: [],
 };
 export type Command =
   | { kind: "gate"; eventId: string; profile?: number; confirm: boolean }

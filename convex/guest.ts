@@ -68,6 +68,23 @@ export const participation = query({
       unlocked: p?.unlocked ?? false,
       used: p?.used ?? 0,
       votes: tracks.flatMap((t) => (t ? [t.trackId] : [])),
+      votedTracks: tracks.flatMap((t) =>
+        t
+          ? [
+              {
+                _id: t._id,
+                trackId: t.trackId,
+                title: t.title,
+                artist: t.artist,
+                votes: t.votes,
+                archived: t.archived,
+                removedAt: t.removedAt,
+                artwork: t.artwork,
+                url: t.url,
+              },
+            ]
+          : [],
+      ),
     };
   },
 });

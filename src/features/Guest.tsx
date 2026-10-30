@@ -299,6 +299,35 @@ export function Guest() {
             Tienes tres votos para toda la noche. No se pueden cambiar ni
             recuperar.
           </p>
+          <section className="my-votes" aria-labelledby="my-votes-title">
+            <div className="section-title">
+              <h2 id="my-votes-title">Tus votos</h2>
+              <span>{p.votes.length} DE 3</span>
+            </div>
+            {p.votes.length === 0 ? (
+              <p className="hint">Tus canciones elegidas aparecerán aquí.</p>
+            ) : (
+              <ul className="my-votes-list">
+                {p.votedTracks.map((track) => (
+                  <li key={track.id}>
+                    <div>
+                      <strong>{track.title}</strong>
+                      <span>{track.artist}</span>
+                    </div>
+                    <span
+                      className={
+                        track.archived ? "vote-status removed" : "vote-status"
+                      }
+                    >
+                      {track.archived
+                        ? "Retirada por el DJ · Voto utilizado"
+                        : "✓ Voto registrado"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
           <label className="search">
             <span>⌕</span>
             <input
