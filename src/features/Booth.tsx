@@ -5,8 +5,16 @@ import type { Command } from "../data/types";
 import { Modal } from "../components/Modal";
 import { TrackRow } from "../components/TrackRow";
 export function Booth() {
-  const { event, admin, authLoading, authError, metrics, execute, connected } =
-    useData();
+  const {
+    event,
+    admin,
+    authLoading,
+    authError,
+    metrics,
+    providerQuota,
+    execute,
+    connected,
+  } = useData();
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [profiles, setProfiles] = useState(["", ""]);
@@ -105,6 +113,21 @@ export function Booth() {
               Salir
             </button>
           </div>
+          {providerQuota !== "ok" && (
+            <div className="notice" role="status">
+              {providerQuota === "paused"
+                ? "Spotify alcanzó su límite. Las canciones disponibles siguen funcionando."
+                : "Spotify se comprobará en una búsqueda."}
+              {providerQuota === "paused" && (
+                <button
+                  disabled={busy || !connected}
+                  onClick={() => void run({ kind: "retryProvider" })}
+                >
+                  Reintentar Spotify
+                </button>
+              )}
+            </div>
+          )}
           {event?.live ? (
             <>
               <div className="budget">

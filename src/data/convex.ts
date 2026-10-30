@@ -20,6 +20,8 @@ const messages: Record<string, string> = {
   SESSION_EXPIRED: "Tu sesión venció. Vuelve a participar.",
   SEARCH_UNAVAILABLE: "Búsqueda no disponible. Inténtalo en un momento.",
   SEARCH_NOT_CONFIGURED: "Spotify aún no está configurado.",
+  QUOTA_EXCEEDED:
+    "La búsqueda de Spotify alcanzó su límite. Puedes votar canciones disponibles.",
 };
 export function createConvexAdapter(
   url: string,
@@ -73,6 +75,7 @@ export function createConvexAdapter(
     admin: false,
     authLoading: true,
     authError: null,
+    providerQuota: "ok",
     metrics: null,
     connected: true,
     loading: true,
@@ -147,6 +150,21 @@ export function createConvexAdapter(
             localStorage.removeItem("welist-token");
             token = "";
             snapshot = { ...snapshot, participation: emptyParticipation };
+            emit();
+          },
+        ),
+      );
+    if (authenticated)
+      children.push(
+        client.onUpdate(
+          makeFunctionReference<"query">("admin:providerStatus"),
+          {},
+          (status: Snapshot["providerQuota"]) => {
+            snapshot = { ...snapshot, providerQuota: status };
+            emit();
+          },
+          () => {
+            snapshot = { ...snapshot, providerQuota: "ok" };
             emit();
           },
         ),
@@ -256,6 +274,10 @@ export function createConvexAdapter(
       });
       return "Evento iniciado.";
     }
+    if (c.kind === "retryProvider") {
+      await mutation("admin:retryProvider", {});
+      return "Se comprobará Spotify en la próxima búsqueda.";
+    }
     if (c.kind === "end") {
       await mutation("admin:end", { eventId: c.eventId });
       return "Evento terminado.";
@@ -311,6 +333,19 @@ export function createConvexAdapter(
       return {
         ...participation,
         votedTracks: (participation.votedTracks ?? []).map(track),
+      };
+    },
+    localSearch: async (eventId, term) => {
+      await ensureGuest();
+      const result = await client.action(
+        makeFunctionReference<"action">("services:localSearch"),
+        { token, eventId, term },
+      );
+      return {
+        tracks: (result.tracks ?? []).map(track),
+        error: result.error
+          ? messages[result.error] || "Error de búsqueda."
+          : undefined,
       };
     },
     setAuthState: (value, loading) => {

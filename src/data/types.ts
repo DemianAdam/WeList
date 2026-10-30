@@ -44,6 +44,7 @@ export type Snapshot = {
   admin: boolean;
   authLoading: boolean;
   authError: string | null;
+  providerQuota: "ok" | "paused" | "armed" | "probing";
   metrics: Metrics | null;
   connected: boolean;
   loading: boolean;
@@ -59,6 +60,7 @@ export type Command =
   | { kind: "vote"; eventId: string; trackId: string }
   | { kind: "login"; password: string }
   | { kind: "logout" }
+  | { kind: "retryProvider" }
   | { kind: "start"; name: string; profiles: string[] }
   | { kind: "end"; eventId: string }
   | { kind: "archive"; eventId: string; trackId: string; undo: boolean };
@@ -67,6 +69,7 @@ export interface Adapter {
   subscribe: (listener: () => void) => () => void;
   execute: (command: Command) => Promise<string>;
   getParticipation: (eventId: string) => Promise<Participation>;
+  localSearch: (eventId: string, term: string) => Promise<SearchResult>;
   search: (
     eventId: string,
     term: string,

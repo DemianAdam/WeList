@@ -47,6 +47,7 @@ export function createMockAdapter(): Adapter {
       admin: expiry > Date.now(),
       authLoading: false,
       authError: null,
+      providerQuota: "ok",
       connected: navigator.onLine,
       loading: false,
       metrics: {
@@ -83,7 +84,9 @@ export function createMockAdapter(): Adapter {
           throw Error("Contraseña incorrecta.");
         sessionStorage.setItem(ADMIN, String(Date.now() + 12 * 3600000));
       } else if (command.kind === "logout") sessionStorage.removeItem(ADMIN);
-      else if (command.kind === "start") {
+      else if (command.kind === "retryProvider") {
+        if (!snapshot.admin) throw Error("Inicia sesión.");
+      } else if (command.kind === "start") {
         if (!snapshot.admin) throw Error("Inicia sesión.");
         if (snapshot.event?.live)
           throw Error("Primero termina el evento actual.");
@@ -185,6 +188,18 @@ export function createMockAdapter(): Adapter {
       return () => listeners.delete(fn);
     },
     execute,
+    localSearch: async (eventId, term) => {
+      const event = read().events.find((e) => e.id === eventId);
+      if (!event?.live) throw Error("El evento terminó.");
+      const q = term.trim().toLocaleLowerCase();
+      return {
+        tracks: event.tracks.filter(
+          (t) =>
+            !t.archived &&
+            (t.title + " " + t.artist).toLocaleLowerCase().includes(q),
+        ),
+      };
+    },
     getParticipation: async (eventId) => {
       if (!navigator.onLine) throw Error("Sin conexión. Vuelve a intentarlo.");
       const state = read();

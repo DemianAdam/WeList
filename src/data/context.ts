@@ -10,6 +10,7 @@ export function useData() {
     ...snapshot,
     execute: adapter.execute,
     getParticipation: adapter.getParticipation,
+    localSearch: adapter.localSearch,
     search: adapter.search,
     loadMore: adapter.loadMore,
   };

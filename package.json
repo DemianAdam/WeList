@@ -12,6 +12,7 @@
     "typecheck": "tsc -b && tsc -p convex/tsconfig.json && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:staging": "node scripts/staging-load.mjs",
     "admin:setup": "node --env-file=.env.local scripts/admin-setup.mjs",
     "format": "prettier --write src convex api tests docs *.json *.ts *.md"
   },

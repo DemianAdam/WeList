@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "./lib/server";
 import { rate, session, live } from "./lib/security";
 import { trackFields } from "./schema";
+import { anyApi } from "convex/server";
 export const createSession = internalMutation({
   args: {
     hash: v.string(),
@@ -25,6 +26,17 @@ export const searchPermit = internalMutation({
     const guest = await session(ctx, token, "guest");
     await live(ctx, eventId);
     if (!(await rate(ctx, "search:" + guest._id, 30)))
+      return { error: "RATE_LIMITED" as const };
+    return { ok: true };
+  },
+});
+
+export const localSearchPermit = internalMutation({
+  args: { token: v.string(), eventId: v.id("events") },
+  handler: async (ctx, { token, eventId }) => {
+    const guest = await session(ctx, token, "guest");
+    await live(ctx, eventId);
+    if (!(await rate(ctx, "local-search:" + guest._id, 30)))
       return { error: "RATE_LIMITED" as const };
     return { ok: true };
   },
@@ -55,6 +67,17 @@ export const searchLease = internalMutation({
       .query("provider")
       .withIndex("key", (q) => q.eq("key", "spotify"))
       .unique();
+    if (provider?.quotaStatus === "paused")
+      return { error: "QUOTA_EXCEEDED" as const };
+    if (provider?.quotaStatus === "probing") {
+      if ((provider.probeExpiresAt ?? 0) <= Date.now())
+        await ctx.db.patch(provider._id, {
+          quotaStatus: "paused",
+          probeOwner: undefined,
+          probeExpiresAt: undefined,
+        });
+      return { error: "QUOTA_EXCEEDED" as const };
+    }
     if (provider && provider.blockedUntil > Date.now())
       return { error: "SEARCH_UNAVAILABLE" as const };
     if (
@@ -65,11 +88,41 @@ export const searchLease = internalMutation({
       ))
     )
       return { error: "RATE_LIMITED" as const };
+    if (provider?.quotaStatus === "armed") {
+      await ctx.db.patch(provider._id, {
+        quotaStatus: "probing",
+        probeOwner: owner,
+        probeExpiresAt: Date.now() + 25000,
+      });
+      await ctx.scheduler.runAfter(25000, anyApi.internal.expireQuotaProbe, {
+        owner,
+      });
+    }
     const data = { key, owner, eventId, expiresAt: Date.now() + 25000 };
     if (lease) await ctx.db.replace(lease._id, data);
     else await ctx.db.insert("searchLeases", data);
     console.log("search_cache_miss");
     return { provider };
+  },
+});
+
+export const expireQuotaProbe = internalMutation({
+  args: { owner: v.string() },
+  handler: async (ctx, { owner }) => {
+    const provider = await ctx.db
+      .query("provider")
+      .withIndex("key", (q) => q.eq("key", "spotify"))
+      .unique();
+    if (
+      provider?.quotaStatus === "probing" &&
+      provider.probeOwner === owner &&
+      (provider.probeExpiresAt ?? 0) <= Date.now()
+    )
+      await ctx.db.patch(provider._id, {
+        quotaStatus: "paused",
+        probeOwner: undefined,
+        probeExpiresAt: undefined,
+      });
   },
 });
 
@@ -81,6 +134,50 @@ export const releaseSearchLease = internalMutation({
       .withIndex("key", (q) => q.eq("key", key))
       .unique();
     if (lease?.owner === owner) await ctx.db.delete(lease._id);
+    const provider = await ctx.db
+      .query("provider")
+      .withIndex("key", (q) => q.eq("key", "spotify"))
+      .unique();
+    if (provider?.quotaStatus === "probing" && provider.probeOwner === owner)
+      await ctx.db.patch(provider._id, {
+        quotaStatus: "paused",
+        probeOwner: undefined,
+        probeExpiresAt: undefined,
+      });
+  },
+});
+
+export const setQuota = internalMutation({
+  args: { owner: v.string(), exhausted: v.boolean() },
+  handler: async (ctx, { owner, exhausted }) => {
+    const provider = await ctx.db
+      .query("provider")
+      .withIndex("key", (q) => q.eq("key", "spotify"))
+      .unique();
+    if (exhausted) {
+      if (provider)
+        await ctx.db.patch(provider._id, {
+          quotaStatus: "paused",
+          probeOwner: undefined,
+          probeExpiresAt: undefined,
+        });
+      else
+        await ctx.db.insert("provider", {
+          key: "spotify",
+          blockedUntil: 0,
+          expiresAt: 0,
+          quotaStatus: "paused",
+        });
+    } else if (
+      provider?.quotaStatus === "probing" &&
+      provider.probeOwner === owner
+    ) {
+      await ctx.db.patch(provider._id, {
+        quotaStatus: undefined,
+        probeOwner: undefined,
+        probeExpiresAt: undefined,
+      });
+    }
   },
 });
 export const saveProvider = internalMutation({

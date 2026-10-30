@@ -1,4 +1,71 @@
 import { test, expect } from "@playwright/test";
+test("one-profile event can retry a failed Instagram visit", async ({
+  page,
+}) => {
+  await page.goto("/dj-booth");
+  await page.getByLabel("Contraseña", { exact: true }).fill("welist-demo");
+  await page.getByRole("button", { name: "Entrar a la cabina" }).click();
+  await page
+    .getByRole("button", { name: "Terminar evento", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Sí, terminar evento" }).click();
+  await page.getByLabel("Nombre del evento").fill("One profile");
+  await page.getByLabel("Perfil de Instagram 1").fill("solo_dj");
+  await page.getByRole("button", { name: "Revisar evento" }).click();
+  await page.getByRole("button", { name: "Iniciar evento" }).click();
+  await page.goto("/");
+  await page.getByLabel("Buscar canción o artista").fill("Midnight");
+  await page.getByRole("button", { name: "Votar Midnight City" }).click();
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    let fail = true;
+    Storage.prototype.setItem = function (key, value) {
+      if (fail && key === "welist-demo-v2" && value.includes('"clicks":[0]')) {
+        fail = false;
+        throw new Error("failed");
+      }
+      original.call(this, key, value);
+    };
+  });
+  const dialog = page.getByRole("dialog", { name: "Conecta con la noche" });
+  await dialog.getByRole("link", { name: "@solo_dj" }).click();
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Vuelve a tocar @solo_dj",
+  );
+  await dialog.getByRole("link", { name: "@solo_dj" }).click();
+  await dialog.getByRole("button", { name: "Continuar", exact: true }).click();
+  await expect(page.getByText("Te quedan 2 de 3 votos")).toBeVisible();
+});
+test("failed Instagram registration is visible inside the gate and can be retried", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Votar Blinding Lights" }).click();
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    let fail = true;
+    Storage.prototype.setItem = function (key, value) {
+      if (fail && key === "welist-demo-v2" && value.includes('"clicks":[0]')) {
+        fail = false;
+        throw new Error("failed");
+      }
+      original.call(this, key, value);
+    };
+  });
+  const dialog = page.getByRole("dialog", { name: "Conecta con la noche" });
+  await dialog.getByRole("link", { name: "@welist.dj" }).click();
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Vuelve a tocar @welist.dj",
+  );
+  await expect(
+    dialog.getByRole("button", { name: "Continuar", exact: true }),
+  ).toBeDisabled();
+  await dialog.getByRole("link", { name: "@welist.dj" }).click();
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+  await dialog.getByRole("link", { name: "@welist.club" }).click();
+  await dialog.getByRole("button", { name: "Continuar", exact: true }).click();
+  await expect(page.getByText("Te quedan 2 de 3 votos")).toBeVisible();
+});
 test("guests can see their votes, including a song removed and restored by the DJ", async ({
   page,
   context,

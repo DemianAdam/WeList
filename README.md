@@ -1,6 +1,6 @@
 # WeList
 
-A Spanish-language DJ request and voting app. Runs immediately with a local demo; includes a separate Convex implementation and Convex Auth.
+A Spanish-language request and voting app for private gatherings of friends. Runs immediately with a local demo; includes a separate Convex implementation and Convex Auth.
 
 ## Run locally
 
@@ -45,4 +45,4 @@ One required Instagram profile visit, plus a second optional profile visit when 
 
 ## Current boundaries
 
-No cloud deployment or live Spotify verification has been performed. Spotify eligibility, brand assets, mobile Instagram app switching, and the 100-client network load exercise require staging configuration. Use mock mode locally or the Convex deployment for the end-to-end flow. See setup documentation for the exact steps.
+Production behavior and live Spotify access are not established by local tests. Spotify eligibility, branding, a public QR, and mobile Instagram app switching still require validation. A synthetic cloud load exercise is recorded in `docs/STAGING_RESULTS.md`. Use mock mode locally or a configured Convex deployment for the end-to-end flow. See setup documentation for the exact steps.

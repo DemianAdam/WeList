@@ -2,6 +2,31 @@
 import { v } from "convex/values";
 import { anyApi } from "convex/server";
 import { action } from "./lib/server";
+export const localSearch = action({
+  args: { token: v.string(), eventId: v.id("events"), term: v.string() },
+  handler: async (ctx, { token, eventId, term }): Promise<unknown> => {
+    const key = term.trim().replace(/\s+/g, " ").toLowerCase();
+    if (key.length < 2 || key.length > 100) return { tracks: [] };
+    const permit = await ctx.runMutation(anyApi.internal.localSearchPermit, {
+      token,
+      eventId,
+    });
+    if (permit.error) return { tracks: [], error: permit.error };
+    const requested = await ctx.runQuery(anyApi.internal.localSearch, {
+      eventId,
+      term: key,
+    });
+    const cached = await ctx.runQuery(anyApi.internal.cachedSongSearch, {
+      eventId,
+      term: key,
+    });
+    console.log(cached.length ? "song_cache_hit" : "song_cache_miss");
+    const ids = new Set(requested.map((t: any) => t.trackId));
+    return {
+      tracks: [...requested, ...cached.filter((t: any) => !ids.has(t.trackId))],
+    };
+  },
+});
 export const search = action({
   args: {
     token: v.string(),
@@ -109,6 +134,14 @@ export const search = action({
       console.log("spotify_provider_call");
       if (res.status === 429) {
         console.warn("spotify_search_failure");
+        const body = await res.json().catch(() => null);
+        if (body?.error?.reason === "QUOTA_EXCEEDED") {
+          await ctx.runMutation(anyApi.internal.setQuota, {
+            owner,
+            exhausted: true,
+          });
+          return { tracks: local, error: "QUOTA_EXCEEDED" };
+        }
         const seconds = Number(res.headers.get("Retry-After")) || 60;
         await ctx.runMutation(anyApi.internal.saveProvider, {
           token: access,
@@ -143,6 +176,10 @@ export const search = action({
         tracks,
       });
       if (!saved) return { tracks: local, error: "SEARCH_UNAVAILABLE" };
+      await ctx.runMutation(anyApi.internal.setQuota, {
+        owner,
+        exhausted: false,
+      });
       return await merge(tracks, "spotify");
     } catch {
       console.warn("spotify_search_failure");

@@ -15,6 +15,29 @@ async function requireAdmin(ctx: QueryCtx) {
     throw new ConvexError("UNAUTHORIZED");
   return true;
 }
+export const providerStatus = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const provider = await ctx.db
+      .query("provider")
+      .withIndex("key", (q) => q.eq("key", "spotify"))
+      .unique();
+    return provider?.quotaStatus ?? "ok";
+  },
+});
+export const retryProvider = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const provider = await ctx.db
+      .query("provider")
+      .withIndex("key", (q) => q.eq("key", "spotify"))
+      .unique();
+    if (provider?.quotaStatus === "paused")
+      await ctx.db.patch(provider._id, { quotaStatus: "armed" });
+  },
+});
 export const dashboard = query({
   args: {},
   handler: async (ctx) => {

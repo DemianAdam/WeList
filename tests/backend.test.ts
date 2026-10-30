@@ -299,6 +299,116 @@ describe("transactional event rules", () => {
   });
 });
 
+it("pauses exhausted Spotify quota until an authorized DJ allows one probe", async () => {
+  const { t, admin, eventId } = await setup();
+  vi.stubEnv("SPOTIFY_CLIENT_ID", "test");
+  vi.stubEnv("SPOTIFY_CLIENT_SECRET", "test");
+  let exhausted = true;
+  const fetcher = vi.fn(async (url: string | URL | Request) => {
+    if (String(url).includes("accounts.spotify.com"))
+      return new Response(
+        JSON.stringify({ access_token: "access", expires_in: 3600 }),
+        { status: 200 },
+      );
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    return exhausted
+      ? new Response(JSON.stringify({ error: { reason: "QUOTA_EXCEEDED" } }), {
+          status: 429,
+        })
+      : new Response(JSON.stringify({ tracks: { items: [] } }), {
+          status: 200,
+        });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  try {
+    expect(
+      await t.action(anyApi.services.search, {
+        token: "guest",
+        eventId,
+        term: "absent",
+      }),
+    ).toMatchObject({ error: "QUOTA_EXCEEDED" });
+    expect(await admin.query(anyApi.admin.providerStatus, {})).toBe("paused");
+    await expect(t.mutation(anyApi.admin.retryProvider, {})).rejects.toThrow();
+    const calls = fetcher.mock.calls.length;
+    expect(
+      await t.action(anyApi.services.search, {
+        token: "other",
+        eventId,
+        term: "another",
+      }),
+    ).toMatchObject({ error: "QUOTA_EXCEEDED" });
+    expect(fetcher).toHaveBeenCalledTimes(calls);
+    await admin.mutation(anyApi.admin.retryProvider, {});
+    expect(await admin.query(anyApi.admin.providerStatus, {})).toBe("armed");
+    expect(
+      await t.action(anyApi.services.search, {
+        token: "guest",
+        eventId,
+        term: "retry-exhausted",
+      }),
+    ).toMatchObject({ error: "QUOTA_EXCEEDED" });
+    expect(await admin.query(anyApi.admin.providerStatus, {})).toBe("paused");
+    await admin.mutation(anyApi.admin.retryProvider, {});
+    exhausted = false;
+    const results = await Promise.all(
+      ["other", "guest"].map((token, i) =>
+        t.action(anyApi.services.search, {
+          token,
+          eventId,
+          term: `newquery${i}`,
+        }),
+      ),
+    );
+    expect(results.filter((r) => r.source === "spotify")).toHaveLength(1);
+    expect(fetcher).toHaveBeenCalledTimes(calls + 2);
+    expect(await admin.query(anyApi.admin.providerStatus, {})).toBe("ok");
+  } finally {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
+});
+
+it("handles ordinary Spotify rate limiting with Retry-After without marking quota exhausted", async () => {
+  const { t, admin, eventId } = await setup();
+  vi.stubEnv("SPOTIFY_CLIENT_ID", "test");
+  vi.stubEnv("SPOTIFY_CLIENT_SECRET", "test");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL | Request) =>
+      String(url).includes("accounts.spotify.com")
+        ? new Response(
+            JSON.stringify({ access_token: "access", expires_in: 3600 }),
+            { status: 200 },
+          )
+        : new Response("not json", {
+            status: 429,
+            headers: { "Retry-After": "42" },
+          }),
+    ),
+  );
+  try {
+    expect(
+      await t.action(anyApi.services.search, {
+        token: "guest",
+        eventId,
+        term: "none",
+      }),
+    ).toMatchObject({ error: "SEARCH_UNAVAILABLE" });
+    expect(await admin.query(anyApi.admin.providerStatus, {})).toBe("ok");
+    const provider = await t.run((ctx) =>
+      ctx.db
+        .query("provider")
+        .withIndex("key", (q) => q.eq("key", "spotify"))
+        .unique(),
+    );
+    expect(provider!.blockedUntil - Date.now()).toBeGreaterThan(40000);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
+});
+
 it("handles 100 simulated guests in batches of 20 without losing votes", async () => {
   const { t, eventId } = await setup();
   const guestIds = await t.run(async (ctx) => {
@@ -393,6 +503,40 @@ it("rate-limits remote search attempts and honors global cooldown", async () => 
   ).toEqual({ error: "SEARCH_UNAVAILABLE" });
 });
 
+it("validates and rate-limits the local search stage independently", async () => {
+  const { t, admin, eventId } = await setup();
+  await expect(
+    t.action(anyApi.services.localSearch, {
+      token: "invalid",
+      eventId,
+      term: "song",
+    }),
+  ).rejects.toThrow();
+  for (let i = 0; i < 30; i++)
+    expect(
+      await t.action(anyApi.services.localSearch, {
+        token: "guest",
+        eventId,
+        term: "song",
+      }),
+    ).toHaveProperty("tracks");
+  expect(
+    await t.action(anyApi.services.localSearch, {
+      token: "guest",
+      eventId,
+      term: "song",
+    }),
+  ).toMatchObject({ error: "RATE_LIMITED" });
+  await admin.mutation(anyApi.admin.end, { eventId });
+  await expect(
+    t.action(anyApi.services.localSearch, {
+      token: "other",
+      eventId,
+      term: "song",
+    }),
+  ).rejects.toThrow();
+});
+
 it("only permits the explicitly authorized identity, even if another user is authenticated", async () => {
   const { t, admin, eventId } = await setup();
   expect(await admin.query(anyApi.admin.dashboard, {})).not.toBeNull();
@@ -441,9 +585,9 @@ it("provisions and reprovisions the DJ account while public signup is disabled",
   );
 });
 
-it("issues 500 distinct real guest sessions and enforces the configured ceiling", async () => {
+it("issues 500 guest sessions and enforces a configured ceiling", async () => {
   const t = convexTest(schema, modules);
-  vi.stubEnv("GUEST_SESSIONS_PER_MINUTE", "500");
+  vi.stubEnv("GUEST_SESSIONS_PER_MINUTE", "1000");
   try {
     const tokens = [];
     for (let i = 0; i < 25; i++)
@@ -455,7 +599,12 @@ it("issues 500 distinct real guest sessions and enforces the configured ceiling"
         )),
       );
     expect(new Set(tokens).size).toBe(500);
-    expect(await t.mutation(anyApi.guest.issueSession, {})).toBe(
+    vi.stubEnv("GUEST_SESSIONS_PER_MINUTE", "1");
+    const limited = convexTest(schema, modules);
+    expect(await limited.mutation(anyApi.guest.issueSession, {})).not.toBe(
+      "RATE_LIMITED",
+    );
+    expect(await limited.mutation(anyApi.guest.issueSession, {})).toBe(
       "RATE_LIMITED",
     );
   } finally {

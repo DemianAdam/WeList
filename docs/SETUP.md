@@ -45,17 +45,19 @@ When starting an event, configure one required Instagram profile. A second profi
 
 ## 4. Verify Spotify
 
-Create an app in Spotify's developer dashboard. **Before a venue pilot, confirm that the intended use is permitted** by Spotify's [Developer Policy](https://developer.spotify.com/policy), including its restrictions concerning businesses and public playback; development credentials alone do not establish eligibility. Search uses client credentials, never guest Spotify login. The UI uses an adapter boundary so a different catalog provider can be substituted if needed.
+WeList is intended for private gatherings of friends. Create an app in Spotify's developer dashboard and confirm this intended use meets [Spotify's Developer Policy](https://developer.spotify.com/policy) and terms. Development credentials alone do not establish eligibility. Search uses client credentials, never guest Spotify login. The UI uses an adapter boundary so a different catalog provider can be substituted if needed.
 
-In staging, create an event and enter a query. Search automatically checks existing requests and the current event's shared song cache; when fewer than five distinct songs match it also checks Spotify. “Buscar más canciones” expands a search manually. Confirm metadata and artwork return, request a track, and verify another browser sees it. Each cached song expires 24 hours after a provider fetch; closing the event blocks cache use immediately and schedules bounded deletion. Exact-query responses, including empty results, expire after 60 seconds. Search hit/miss/provider-call/failure logs contain no search terms. Tokens are reused until within a minute of expiry. HTTP 429 activates a global provider cooldown using Retry-After. No client-provided titles, artists, or artwork can create a request.
+In staging, create an event and enter a query. Search displays existing requests and the current event's shared song cache first; when fewer than five distinct songs match it also checks Spotify in the background. “Buscar más canciones” expands a search manually. Confirm metadata and artwork return, request a track, and verify another browser sees it. Each cached song expires 24 hours after a provider fetch; closing the event blocks cache use immediately and schedules bounded deletion. Exact-query responses, including empty results, expire after 60 seconds. Search hit/miss/provider-call/failure logs contain no search terms. Tokens are reused until within a minute of expiry. Ordinary HTTP 429 responses use Retry-After. `QUOTA_EXCEEDED` pauses provider calls until the DJ selects “Reintentar Spotify”; one subsequent actual provider search checks recovery. Local songs remain available. No client-provided titles, artists, or artwork can create a request.
 
-Confirm the proposed 24-hour metadata retention and intended venue use with Spotify before any pilot. The existing event history also retains requested-track metadata for up to 30 days after an event; review that separately under the current provider terms. Emulator tests and these durations do not establish permission.
+Confirm the proposed 24-hour metadata retention and intended personal use with Spotify before any pilot. The existing event history also retains requested-track metadata for up to 30 days after an event; review that separately under the current provider terms. Emulator tests and these durations do not establish permission.
 
 After updating an existing deployment, older global cache entries are not reused and expire through normal cleanup. Guests with old, unrequested search results should search again to obtain event-scoped trusted metadata. Existing event requests and votes remain intact.
 
 Review current Spotify branding rules before publication, including official logo attribution alongside metadata, artwork treatment and links. The app already includes direct Spotify links and provider artwork; official brand assets are not bundled. Sources: https://developer.spotify.com/documentation/web-api and https://developer.spotify.com/documentation/design
 
 ## 5. Pilot validation
+
+Use a separate disposable staging deployment. Deploy the code to staging, set `WELIST_STAGING_LOAD_TEST=true` **only on staging**, and call the internal `staging:seed` function using deployment administrator credentials. Set `WELIST_STAGING_URL` to that deployment URL and run `npm run test:staging -- --i-understand-staging`. The script refuses to run without the server-side staging guard and a synthetic event. It sends 500 session requests in 20 waves of 25, then exercises 100 WebSocket clients attempting 20 votes per second. It prints failures and mutation and subscription latency percentiles. Never enable this guard on production or an existing personal development deployment. Staging data is synthetic; disable the flag after testing.
 
 - Test with iOS Safari and Android Chrome on actual phones, including Instagram installed/not installed, denied popups, and return navigation. No focus listener grants access.
 - Confirm your permanent QR resolves to the public origin, never localhost.
@@ -69,5 +71,7 @@ Review current Spotify branding rules before publication, including official log
 ## Retention and limits
 
 An hourly cron removes ended-event data older than 30 days in bounded batches and cleans expired sessions, cached metadata and rate-limit windows. Large datasets may take several cron runs to drain. Active events are not automatically ended. The pilot leaderboard has a 1,000-row safety bound; revisit pagination before events with larger request volumes. Search matches use case-insensitive substrings; recording-level deduplication is not implemented.
+
+Guest-session issuance divides the configurable per-minute ceiling across up to 32 counters to reduce write conflicts during arrivals. Uneven traffic can fill an individual counter before the aggregate ceiling is reached; measure real traffic and adjust capacity if necessary.
 
 This pilot has no payments, playback integration, user accounts, verified follow checks, or multi-venue tenancy.

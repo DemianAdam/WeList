@@ -38,6 +38,7 @@ export function Guest() {
     participation: p,
     execute,
     getParticipation,
+    localSearch,
     search,
     connected,
     loading,
@@ -54,6 +55,9 @@ export function Guest() {
   }, [event]);
   const submitting = useRef(false);
   const [gateError, setGateError] = useState("");
+  const [failedProfiles, setFailedProfiles] = useState<number[]>([]);
+  const [profileBusy, setProfileBusy] = useState<number[]>([]);
+  const profileInFlight = useRef(new Set<number>());
   function savePending(value: PendingVote | null) {
     pendingRef.current = value;
     setPending(value);
@@ -121,6 +125,7 @@ export function Guest() {
     q,
     needsSearch,
     forceSearch,
+    localSearch,
     search,
   );
   async function submit(track: Track) {
@@ -134,6 +139,7 @@ export function Guest() {
         phase: "gate",
       });
       setGateError("");
+      setFailedProfiles([]);
       return;
     }
     setBusy(track.id);
@@ -148,16 +154,29 @@ export function Guest() {
     }
   }
   async function profile(index: number) {
-    if (!event) return;
+    if (!event || profileInFlight.current.has(index)) return;
+    profileInFlight.current.add(index);
+    const eventId = event.id;
+    const trackId = pendingRef.current?.trackId;
+    setProfileBusy((items) => [...new Set([...items, index])]);
+    setFailedProfiles((items) => items.filter((i) => i !== index));
     try {
       await execute({
         kind: "gate",
-        eventId: event.id,
+        eventId,
         profile: index,
         confirm: false,
       });
     } catch {
-      setMessage("No se pudo registrar la visita. Inténtalo nuevamente.");
+      if (
+        currentEvent.current?.id === eventId &&
+        pendingRef.current?.eventId === eventId &&
+        pendingRef.current?.trackId === trackId
+      )
+        setFailedProfiles((items) => [...new Set([...items, index])]);
+    } finally {
+      profileInFlight.current.delete(index);
+      setProfileBusy((items) => items.filter((i) => i !== index));
     }
   }
   function isCurrent(selection: PendingVote) {
@@ -413,6 +432,7 @@ export function Guest() {
               if (!submitting.current) {
                 savePending(null);
                 setGateError("");
+                setFailedProfiles([]);
               }
             }}
           >
@@ -431,17 +451,24 @@ export function Guest() {
               Tu voto: <strong>{pending.title}</strong> — {pending.artist}
             </p>
             {event.profiles.map((handle, index) => (
-              <a
-                key={handle}
-                className="profile"
-                href={"https://www.instagram.com/" + handle + "/"}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => void profile(index)}
-              >
-                @{handle}
-                <span>{p.clicks.includes(index) ? "✓" : "↗"}</span>
-              </a>
+              <div key={handle}>
+                <a
+                  className="profile"
+                  href={"https://www.instagram.com/" + handle + "/"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => void profile(index)}
+                >
+                  @{handle}
+                  <span>{p.clicks.includes(index) ? "✓" : "↗"}</span>
+                </a>
+                {failedProfiles.includes(index) && (
+                  <p role="alert">
+                    No se pudo registrar la visita. Vuelve a tocar @{handle}{" "}
+                    para intentarlo nuevamente.
+                  </p>
+                )}
+              </div>
             ))}
             {gateError && <p role="alert">{gateError}</p>}
             {pending.phase === "uncertain" ? (
@@ -459,6 +486,7 @@ export function Guest() {
                   (pending.phase === "gate" &&
                     p.clicks.length !== event.profiles.length) ||
                   !!busy ||
+                  profileBusy.length > 0 ||
                   !connected
                 }
                 onClick={() => void unlock()}

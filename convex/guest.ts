@@ -11,7 +11,14 @@ export const issueSession = mutation({
     const configured = Number(process.env.GUEST_SESSIONS_PER_MINUTE);
     const ceiling =
       Number.isSafeInteger(configured) && configured > 0 ? configured : 1000;
-    if (!(await rate(ctx, "guest-session", ceiling))) return "RATE_LIMITED";
+    // Spread concurrent arrivals across independent counters while keeping the
+    // sum of their minute budgets at the configured global ceiling.
+    const shards = Math.min(32, ceiling);
+    const shard = Number.parseInt(token.slice(0, 8), 16) % shards;
+    const shardLimit =
+      Math.floor(ceiling / shards) + (shard < ceiling % shards ? 1 : 0);
+    if (!(await rate(ctx, "guest-session:" + shard, shardLimit)))
+      return "RATE_LIMITED";
     await ctx.db.insert("sessions", {
       hash: digest(token),
       role: "guest",
