@@ -1,0 +1,486 @@
+import { useSongSearch } from "../hooks/useSongSearch";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useData, isDemo } from "../data/context";
+import { Modal } from "../components/Modal";
+import { TrackRow } from "../components/TrackRow";
+import { CommandError, type Track } from "../data/types";
+type PendingVote = {
+  eventId: string;
+  trackId: string;
+  title: string;
+  artist: string;
+  phase: "gate" | "uncertain" | "retry";
+};
+const PENDING_KEY = "welist-pending-vote";
+function readPending(): PendingVote | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null");
+    if (
+      !value ||
+      typeof value.eventId !== "string" ||
+      typeof value.trackId !== "string" ||
+      typeof value.title !== "string" ||
+      typeof value.artist !== "string" ||
+      !["gate", "uncertain", "retry"].includes(value.phase)
+    )
+      return null;
+    return {
+      ...value,
+      phase: value.phase === "retry" ? "uncertain" : value.phase,
+    };
+  } catch {
+    return null;
+  }
+}
+export function Guest() {
+  const {
+    event,
+    participation: p,
+    execute,
+    getParticipation,
+    search,
+    connected,
+    loading,
+    loadMore,
+  } = useData();
+  const [query, setQuery] = useState("");
+  const [expandedSearch, setExpandedSearch] = useState("");
+
+  const [pending, setPending] = useState<PendingVote | null>(readPending);
+  const pendingRef = useRef(pending);
+  const currentEvent = useRef(event);
+  useLayoutEffect(() => {
+    currentEvent.current = event;
+  }, [event]);
+  const submitting = useRef(false);
+  const [gateError, setGateError] = useState("");
+  function savePending(value: PendingVote | null) {
+    pendingRef.current = value;
+    setPending(value);
+    try {
+      if (value) sessionStorage.setItem(PENDING_KEY, JSON.stringify(value));
+      else sessionStorage.removeItem(PENDING_KEY);
+    } catch {
+      /* The current tab can still complete the vote. */
+    }
+  }
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState("");
+
+  const [limit, setLimit] = useState(50);
+  const [ack, setAck] = useState<string | null>(null);
+
+  const seen = useRef<string | null>(null);
+  const id = event?.id;
+  const active =
+    event?.tracks
+      .filter((t) => !t.archived)
+      .sort((a, b) => b.votes - a.votes) || [];
+  const q = query.trim().toLocaleLowerCase();
+  const local = active.filter((t) =>
+    (t.title + " " + t.artist).toLocaleLowerCase().includes(q),
+  );
+  const searchKey = JSON.stringify([id, q]);
+  const needsSearch = !!id && q.length >= 2;
+  const forceSearch = expandedSearch === searchKey;
+  useEffect(() => {
+    if (id && q) loadMore?.(1000);
+  }, [id, q, loadMore]);
+  useEffect(() => {
+    if (id && seen.current === null) {
+      seen.current = id;
+      setAck(id);
+    }
+    if (id !== seen.current) {
+      setQuery("");
+      setMessage("");
+    }
+  }, [id]);
+  useEffect(() => {
+    if (loading || !pending) return;
+    if (!event?.live || pending.eventId !== event.id) {
+      savePending(null);
+      setGateError("");
+      setMessage("El evento terminó o cambió. Tu voto pendiente se canceló.");
+    }
+  }, [loading, event?.id, event?.live, pending]);
+  useEffect(() => {
+    if (
+      pending &&
+      pending.phase !== "gate" &&
+      pending.eventId === event?.id &&
+      p.votes.includes(pending.trackId)
+    ) {
+      savePending(null);
+      setGateError("");
+      setMessage("¡Tu voto ya cuenta!");
+    }
+  }, [pending, event?.id, p.votes]);
+  const { results, searchError, searching, retrySearch } = useSongSearch(
+    id,
+    q,
+    needsSearch,
+    forceSearch,
+    search,
+  );
+  async function submit(track: Track) {
+    if (!event || ack !== event.id) return;
+    if (!p.unlocked) {
+      savePending({
+        eventId: event.id,
+        trackId: track.id,
+        title: track.title,
+        artist: track.artist,
+        phase: "gate",
+      });
+      setGateError("");
+      return;
+    }
+    setBusy(track.id);
+    try {
+      setMessage(
+        await execute({ kind: "vote", eventId: event.id, trackId: track.id }),
+      );
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "No se pudo votar.");
+    } finally {
+      setBusy("");
+    }
+  }
+  async function profile(index: number) {
+    if (!event) return;
+    try {
+      await execute({
+        kind: "gate",
+        eventId: event.id,
+        profile: index,
+        confirm: false,
+      });
+    } catch {
+      setMessage("No se pudo registrar la visita. Inténtalo nuevamente.");
+    }
+  }
+  function isCurrent(selection: PendingVote) {
+    return (
+      pendingRef.current?.eventId === selection.eventId &&
+      pendingRef.current?.trackId === selection.trackId &&
+      currentEvent.current?.id === selection.eventId &&
+      currentEvent.current.live
+    );
+  }
+  async function submitPending(selection: PendingVote) {
+    if (!isCurrent(selection)) return;
+    savePending({ ...selection, phase: "uncertain" });
+    try {
+      const result = await execute({
+        kind: "vote",
+        eventId: selection.eventId,
+        trackId: selection.trackId,
+      });
+      if (!isCurrent(selection)) return;
+      savePending(null);
+      setGateError("");
+      setMessage(result);
+    } catch (e) {
+      if (!isCurrent(selection)) return;
+      if (e instanceof CommandError && e.code === "DUPLICATE") {
+        savePending(null);
+        setMessage("Ya votaste esta canción.");
+      } else if (
+        e instanceof CommandError &&
+        [
+          "ARCHIVED",
+          "INVALID_TRACK",
+          "EXHAUSTED",
+          "EVENT_CLOSED",
+          "SESSION_EXPIRED",
+        ].includes(e.code)
+      ) {
+        savePending(null);
+        setMessage(e.message);
+      } else {
+        setGateError(
+          "No pudimos confirmar si se registró tu voto. Compruébalo antes de volver a intentarlo.",
+        );
+      }
+    }
+  }
+  async function unlock() {
+    const selection = pendingRef.current;
+    if (!selection || submitting.current || !isCurrent(selection)) return;
+    submitting.current = true;
+    setBusy("gate");
+    setGateError("");
+    try {
+      if (selection.phase === "gate")
+        await execute({
+          kind: "gate",
+          eventId: selection.eventId,
+          confirm: true,
+        });
+      await submitPending(selection);
+    } catch (e) {
+      if (isCurrent(selection))
+        setGateError(e instanceof Error ? e.message : "Inténtalo nuevamente.");
+    } finally {
+      submitting.current = false;
+      setBusy("");
+    }
+  }
+  async function reconcile() {
+    const selection = pendingRef.current;
+    if (!selection || submitting.current || !isCurrent(selection)) return;
+    submitting.current = true;
+    setBusy("gate");
+    setGateError("");
+    try {
+      const participation = await getParticipation(selection.eventId);
+      if (!isCurrent(selection)) return;
+      if (participation.votes.includes(selection.trackId)) {
+        savePending(null);
+        setMessage("¡Tu voto ya cuenta!");
+      } else if (participation.votes.length >= 3) {
+        savePending(null);
+        setMessage("Ya usaste tus tres votos.");
+      } else {
+        savePending({ ...selection, phase: "retry" });
+        setGateError("El voto aún no aparece. Puedes volver a intentarlo.");
+      }
+    } catch (e) {
+      if (isCurrent(selection))
+        setGateError(
+          e instanceof Error
+            ? e.message
+            : "No se pudo comprobar el voto. Inténtalo nuevamente.",
+        );
+    } finally {
+      submitting.current = false;
+      setBusy("");
+    }
+  }
+  if (loading)
+    return (
+      <div className="empty" role="status">
+        Conectando con la noche…
+      </div>
+    );
+  const ids = new Set(local.map((track) => track.id));
+  const rows = q
+    ? [...local, ...results.filter((track) => !ids.has(track.id))]
+    : active;
+  return (
+    <>
+      <section className="hero">
+        <div className="eyebrow">TU NOCHE. TU MÚSICA.</div>
+        <h1>
+          {event?.live ? event.name : "Nos vemos en la próxima noche."}
+          <span className="lime">↗</span>
+        </h1>
+        <p>
+          Pide esa canción. Suma tu voto. Hagamos que esta noche suene a todos.
+        </p>
+      </section>
+      {event?.live ? (
+        <>
+          <div className="budget">
+            <div>
+              <span>TU VOZ EN LA PISTA</span>
+              <strong>Te quedan {3 - p.votes.length} de 3 votos</strong>
+            </div>
+            <div className="dots" aria-hidden="true">
+              {[0, 1, 2].map((i) => (
+                <b className={i < p.votes.length ? "used" : ""} key={i}>
+                  ✦
+                </b>
+              ))}
+            </div>
+          </div>
+          <p className="hint">
+            Tienes tres votos para toda la noche. No se pueden cambiar ni
+            recuperar.
+          </p>
+          <label className="search">
+            <span>⌕</span>
+            <input
+              maxLength={100}
+              aria-label="Buscar canción o artista"
+              placeholder="Busca una canción o artista…"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setLimit(50);
+              }}
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                aria-label="Limpiar búsqueda"
+              >
+                ×
+              </button>
+            )}
+          </label>
+          <section>
+            <div className="section-title">
+              <h2>{q ? "Resultados" : "Lo que quiere la pista"}</h2>
+              <span>{active.length} CANCIONES</span>
+            </div>
+            {q && local.length > 0 && (
+              <p className="hint">Ya está en la pista · Suma tu voto</p>
+            )}
+            {q.length >= 2 && !forceSearch && (
+              <button onClick={() => setExpandedSearch(searchKey)}>
+                Buscar más canciones
+              </button>
+            )}
+            {searching && <p role="status">Buscando canciones…</p>}
+            {searchError && (
+              <div className="notice">
+                {searchError}
+                <button onClick={retrySearch}>Reintentar</button>
+              </div>
+            )}
+            {rows.slice(0, limit).map((track, index) => (
+              <TrackRow
+                key={track.id}
+                {...{ track, index }}
+                voted={p.votes.includes(track.id)}
+                disabled={
+                  !connected ||
+                  !!busy ||
+                  p.votes.includes(track.id) ||
+                  p.votes.length >= 3 ||
+                  ack !== event.id
+                }
+                pending={busy === track.id}
+                onClick={() => void submit(track)}
+              />
+            ))}
+            {!searching && !rows.length && !searchError && (
+              <div className="empty">
+                {q
+                  ? "No encontramos esa canción. Prueba otro título o artista."
+                  : "La pista espera tu primera canción."}
+              </div>
+            )}
+            {rows.length >= limit && limit < 1000 && (
+              <button
+                onClick={() => {
+                  setLimit(limit + 50);
+                  loadMore?.(limit + 50);
+                }}
+              >
+                Cargar más
+              </button>
+            )}
+            {q && local.length === 0 && isDemo && (
+              <p className="hint">
+                Catálogo de demostración · Sin llamadas a Spotify.
+              </p>
+            )}
+          </section>
+        </>
+      ) : (
+        <div className="empty">
+          No hay un evento activo. Conserva este enlace para la próxima fecha.
+        </div>
+      )}
+      {pending &&
+        event?.live &&
+        pending.eventId === event.id &&
+        ack === event.id && (
+          <Modal
+            title="Conecta con la noche"
+            onClose={() => {
+              if (!submitting.current) {
+                savePending(null);
+                setGateError("");
+              }
+            }}
+          >
+            <div className="eyebrow">CONECTA CON LA NOCHE</div>
+            <h2>
+              {event.profiles.length === 1 ? "Un perfil." : "Dos perfiles."}
+              <br />
+              Tres oportunidades.
+            </h2>
+            <p>
+              Visita{" "}
+              {event.profiles.length === 1 ? "el perfil" : "ambos perfiles"} y
+              vuelve para participar.
+            </p>
+            <p>
+              Tu voto: <strong>{pending.title}</strong> — {pending.artist}
+            </p>
+            {event.profiles.map((handle, index) => (
+              <a
+                key={handle}
+                className="profile"
+                href={"https://www.instagram.com/" + handle + "/"}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => void profile(index)}
+              >
+                @{handle}
+                <span>{p.clicks.includes(index) ? "✓" : "↗"}</span>
+              </a>
+            ))}
+            {gateError && <p role="alert">{gateError}</p>}
+            {pending.phase === "uncertain" ? (
+              <button
+                className="primary"
+                disabled={!!busy || !connected}
+                onClick={() => void reconcile()}
+              >
+                Comprobar voto
+              </button>
+            ) : (
+              <button
+                className="primary"
+                disabled={
+                  (pending.phase === "gate" &&
+                    p.clicks.length !== event.profiles.length) ||
+                  !!busy ||
+                  !connected
+                }
+                onClick={() => void unlock()}
+              >
+                {busy
+                  ? "Registrando…"
+                  : pending.phase === "retry"
+                    ? "Reintentar voto"
+                    : "Continuar"}
+              </button>
+            )}
+            <small>
+              No verificamos si sigues los perfiles. Al continuar, se enviará tu
+              voto.
+            </small>
+          </Modal>
+        )}
+      {event?.live && ack !== null && ack !== event.id && (
+        <Modal title="Nuevo evento">
+          <h2>Comienza una nueva noche.</h2>
+          <p>{event.name}. Tienes tres nuevos votos.</p>
+          <button
+            className="primary"
+            onClick={() => {
+              setAck(event.id);
+              seen.current = event.id;
+            }}
+          >
+            Entrar al evento
+          </button>
+        </Modal>
+      )}
+      {message && (
+        <div className="toast" role="status">
+          {message}
+          <button onClick={() => setMessage("")} aria-label="Cerrar aviso">
+            ×
+          </button>
+        </div>
+      )}
+    </>
+  );
+}

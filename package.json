@@ -1,0 +1,44 @@
+{
+  "name": "welist",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:convex": "convex dev",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "typecheck": "tsc -b && tsc -p convex/tsconfig.json && tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "admin:setup": "node scripts/admin-setup.mjs",
+    "format": "prettier --write src convex api tests docs *.json *.ts *.md"
+  },
+  "dependencies": {
+    "@auth/core": "^0.41.1",
+    "@convex-dev/auth": "^0.0.96",
+    "@noble/hashes": "^2.4.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "convex": "^1.48.0",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "convex-test": "^0.0.66",
+    "oxlint": "^1.89.0",
+    "prettier": "^3.9.10",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
