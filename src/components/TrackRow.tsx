@@ -7,6 +7,7 @@ export function TrackRow({
   pending,
   onClick,
   booth = false,
+  ranked = false,
 }: {
   track: Track;
   index: number;
@@ -15,10 +16,13 @@ export function TrackRow({
   pending?: boolean;
   onClick: () => void;
   booth?: boolean;
+  ranked?: boolean;
 }) {
   return (
     <article className="track">
-      <span className="rank">{String(index + 1).padStart(2, "0")}</span>
+      {(booth || ranked) && (
+        <span className="rank">{String(index + 1).padStart(2, "0")}</span>
+      )}
       {!booth &&
         (track.artwork ? (
           <img
@@ -50,15 +54,23 @@ export function TrackRow({
         )}
       </div>
       <button
+        className={!booth && voted ? "vote-button voted" : !booth ? "vote-button" : undefined}
         aria-label={booth ? "Quitar " + track.title : "Votar " + track.title}
         disabled={disabled || pending}
         onClick={onClick}
       >
-        {pending
-          ? "…"
-          : booth
-            ? "Quitar"
-            : `${voted ? "✓" : "↑"} ${track.votes}`}
+        {pending ? (
+          "…"
+        ) : booth ? (
+          "Quitar"
+        ) : (
+          <>
+            <span>{voted ? "✓ Votada" : "Votar"}</span>
+            <small>
+              {track.votes} {track.votes === 1 ? "voto" : "votos"}
+            </small>
+          </>
+        )}
       </button>
     </article>
   );

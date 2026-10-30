@@ -4,6 +4,8 @@ test("guests can see their votes, including a song removed and restored by the D
   context,
 }) => {
   await page.goto("/");
+  await expect(page.getByRole("link", { name: /Cabina DJ/ })).toHaveCount(0);
+  await page.getByText("Ver tus votos", { exact: false }).click();
   const votes = page.getByRole("region", { name: "Tus votos" });
   await expect(votes).toContainText("Tus canciones elegidas aparecerán aquí.");
   await page.getByRole("button", { name: "Votar Blinding Lights" }).click();
@@ -17,6 +19,7 @@ test("guests can see their votes, including a song removed and restored by the D
   await page.getByLabel("Buscar canción o artista").fill("unrelated search");
   await expect(votes).toContainText("Blinding Lights");
   await page.reload();
+  await page.getByText("Ver tus votos", { exact: false }).click();
   await expect(votes).toContainText("Blinding Lights");
   await expect(votes).toContainText("Levitating");
   const booth = await context.newPage();
@@ -355,6 +358,31 @@ test("catalog requests spend one vote and an old tab acknowledges the next event
   ).toBeVisible();
   await page.getByRole("button", { name: "Entrar al evento" }).click();
   await expect(page.getByText("Te quedan 3 de 3 votos")).toBeVisible();
-  await expect(page.getByRole("region", { name: "Tus votos" })).toContainText("Tus canciones elegidas aparecerán aquí.");
+  await page.getByText("Ver tus votos", { exact: false }).click();
+  await expect(page.getByRole("region", { name: "Tus votos" })).toContainText(
+    "Tus canciones elegidas aparecerán aquí.",
+  );
   await expect(page.getByLabel("Buscar canción o artista")).toHaveValue("");
+});
+
+test("guest controls stay usable on a narrow screen", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto("/");
+  const history = page.locator("details.my-votes");
+  await expect(history).not.toHaveAttribute("open", "");
+  const summary = history.locator("summary");
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  await expect(history).toHaveAttribute("open", "");
+  await expect(page.getByRole("region", { name: "Tus votos" })).toBeVisible();
+  const vote = page.getByRole("button", { name: "Votar Blinding Lights" });
+  await expect(vote).toContainText("Votar");
+  const size = await vote.boundingBox();
+  expect(size!.width).toBeGreaterThanOrEqual(44);
+  expect(size!.height).toBeGreaterThanOrEqual(44);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });

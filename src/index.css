@@ -335,8 +335,8 @@ footer {
   justify-content: space-between;
   align-items: center;
   margin-top: 70px;
-  border-top: 1px solid #2b171b;
-  color: #81778e;
+  border-top: 1px solid #922b40;
+  color: #f52d4c;
   font-size: 12px;
   gap: 20px;
 }
@@ -551,5 +551,246 @@ dialog::backdrop {
 @media (max-width: 600px) {
   .metrics {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Guest experience: prioritize the next action on small screens. */
+.guest {
+  max-width: 720px;
+  margin: 0 auto;
+}
+.guest-intro {
+  padding: 12px 0 4px;
+}
+.guest-kicker {
+  color: #ff8799;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+.guest-intro h1 {
+  margin: 8px 0 12px;
+  font-size: clamp(28px, 5vw, 42px);
+  letter-spacing: -0.04em;
+  overflow-wrap: anywhere;
+}
+.guest .my-votes {
+  margin: 0 0 18px;
+  border: 1px solid #67414a;
+  border-radius: 12px;
+  color: #f4f1fa;
+}
+.guest .my-votes summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 14px;
+  font-weight: 700;
+  list-style: none;
+}
+.guest .my-votes summary::-webkit-details-marker {
+  display: none;
+}
+.guest .my-votes summary > span:last-child {
+  color: #e4cdd2;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.guest .my-votes[open] summary > span:last-child span {
+  display: inline-block;
+  transform: rotate(180deg);
+}
+.guest .my-votes section {
+  padding: 0 16px 12px;
+}
+.guest .my-votes .hint {
+  margin: 0 0 4px;
+}
+.guest .my-votes-list li {
+  align-items: flex-start;
+}
+.guest .my-votes-list strong,
+.guest .my-votes-list div span {
+  overflow-wrap: anywhere;
+}
+.guest .vote-status {
+  color: #ffadb9;
+  font-size: 13px;
+}
+.guest .vote-status.removed {
+  color: #e4cdd2;
+}
+.guest .search-label {
+  display: block;
+  font-size: 16px;
+  font-weight: 750;
+  margin-bottom: 8px;
+}
+.guest .search {
+  margin: 0 0 24px;
+  border-color: #a15a67;
+  background: #140c0e;
+  padding: 0 12px;
+}
+.guest .search input {
+  min-height: 56px;
+  font-size: 16px;
+  padding: 14px 10px;
+}
+.guest .search input::placeholder {
+  color: #c4b5bd;
+}
+.guest .search span {
+  color: #ff8799;
+}
+.guest .section-title {
+  margin: 0 0 10px;
+}
+.guest .section-title h2 {
+  font-size: 20px;
+}
+.guest .section-title > span {
+  color: #d2c0c8;
+  font-size: 11px;
+}
+.guest .hint,
+.guest p {
+  color: #d7cbd0;
+}
+.guest .hint {
+  font-size: 14px;
+}
+.guest .rank {
+  width: 22px;
+  flex: none;
+  color: #d7cbd0;
+  font-size: 13px;
+  font-weight: 700;
+}
+.guest .track {
+  gap: 12px;
+  padding: 14px 0;
+  border-color: #922b40;
+}
+.guest .track-info strong {
+  font-size: 16px;
+  line-height: 1.3;
+}
+.guest .track-info span {
+  color: #d1c4cb;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.guest .spotify {
+  display: inline-block;
+  color: #ff526b;
+  font-size: 12px;
+  margin-top: 6px;
+  text-decoration: underline;
+}
+.guest .track button {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  min-width: 86px;
+  min-height: 54px;
+  padding: 7px 10px;
+  color: #170509;
+  background: #f52d4c;
+  border-color: #f52d4c;
+  border-radius: 12px;
+  box-shadow: 0 3px 0 #8e1028;
+  text-shadow: none;
+  font-weight: 750;
+  line-height: 1.15;
+}
+.guest .track button small {
+  font-size: 12px;
+  font-weight: 600;
+}
+.guest .track button:disabled {
+  opacity: 1;
+  color: #e3d4da;
+  background: #30262b;
+  border-color: #74616a;
+}
+.guest .track button:hover:not(:disabled) {
+  background: #ff526b;
+  border-color: #ff526b;
+}
+.guest .track button:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #8e1028;
+}
+.guest .track button.voted:disabled {
+  color: #fff;
+  background: #641629;
+  border-color: #dd3855;
+  box-shadow: none;
+}
+.guest .track button:disabled:not(.voted) {
+  box-shadow: none;
+}
+.guest .empty,
+.guest .notice {
+  color: #eee2e6;
+}
+.guest .modal {
+  border-color: #a15a67;
+}
+.guest .modal p,
+.guest .modal small {
+  color: #e2d3d9;
+}
+.guest .modal small {
+  font-size: 13px;
+}
+.guest .modal .profile {
+  min-height: 56px;
+  align-items: center;
+  color: #fff;
+  border-color: #a15a67;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.guest .modal .primary {
+  min-height: 54px;
+}
+.guest .modal [role="alert"] {
+  color: #ffb9c2;
+}
+.guest .toast {
+  color: #fff;
+  border-color: #b96472;
+}
+.guest :is(button, a, input, summary):focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+@media (max-width: 360px) {
+  .guest .cover {
+    width: 38px;
+    height: 38px;
+  }
+  .guest .rank {
+    width: 22px;
+    flex: none;
+    color: #d7cbd0;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .guest .track {
+    gap: 8px;
+  }
+  .guest .track button {
+    min-width: 76px;
+  }
+  .guest .my-votes-list li {
+    flex-direction: column;
+  }
+  .guest .vote-status {
+    text-align: left;
   }
 }

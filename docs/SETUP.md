@@ -8,6 +8,8 @@ Use separate development and production deployments. Never commit `.env` files o
 
 ## 2. Configure Convex Auth and server secrets
 
+Share the direct URL `https://<your-domain>/dj-booth` with the DJ and ask them to bookmark it. The guest page does not link to the booth; the URL itself is not a security credential.
+
 WeList uses Convex Auth for the single DJ account `admin@welist.local`. Public signup is disabled. Deploy the backend first, configure Convex Auth's `JWT_PRIVATE_KEY`, `JWKS`, and `SITE_URL` for the deployment (see https://labs.convex.dev/auth/setup), and explicitly provision the DJ. An existing account has no DJ rights until this is done.
 
 Obtain a deployment admin key from the Convex dashboard. In a private PowerShell session set `$env:WELIST_CONVEX_URL` to the exact deployment URL and `$env:WELIST_DEPLOY_KEY` to its admin key, then run `npm run admin:setup`. The command generates and displays a new DJ password once; save it in a password manager. It sends the password directly to an internal Convex action using the deployment key. Never commit, share, or expose that key. Clear the environment variables afterward.

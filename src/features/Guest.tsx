@@ -269,68 +269,56 @@ export function Guest() {
     ? [...local, ...results.filter((track) => !ids.has(track.id))]
     : active;
   return (
-    <>
-      <section className="hero">
-        <div className="eyebrow">TU NOCHE. TU MÚSICA.</div>
-        <h1>
-          {event?.live ? event.name : "Nos vemos en la próxima noche."}
-          <span className="lime">↗</span>
-        </h1>
-        <p>
-          Pide esa canción. Suma tu voto. Hagamos que esta noche suene a todos.
-        </p>
+    <div className="guest">
+      <section className="guest-intro">
+        <span className="guest-kicker">TU NOCHE · TU MÚSICA</span>
+        <h1>{event?.live ? event.name : "Nos vemos en la próxima noche."}</h1>
       </section>
       {event?.live ? (
         <>
-          <div className="budget">
-            <div>
-              <span>TU VOZ EN LA PISTA</span>
+          <details className="my-votes">
+            <summary>
               <strong>Te quedan {3 - p.votes.length} de 3 votos</strong>
-            </div>
-            <div className="dots" aria-hidden="true">
-              {[0, 1, 2].map((i) => (
-                <b className={i < p.votes.length ? "used" : ""} key={i}>
-                  ✦
-                </b>
-              ))}
-            </div>
-          </div>
-          <p className="hint">
-            Tienes tres votos para toda la noche. No se pueden cambiar ni
-            recuperar.
-          </p>
-          <section className="my-votes" aria-labelledby="my-votes-title">
-            <div className="section-title">
-              <h2 id="my-votes-title">Tus votos</h2>
-              <span>{p.votes.length} DE 3</span>
-            </div>
-            {p.votes.length === 0 ? (
-              <p className="hint">Tus canciones elegidas aparecerán aquí.</p>
-            ) : (
-              <ul className="my-votes-list">
-                {p.votedTracks.map((track) => (
-                  <li key={track.id}>
-                    <div>
-                      <strong>{track.title}</strong>
-                      <span>{track.artist}</span>
-                    </div>
-                    <span
-                      className={
-                        track.archived ? "vote-status removed" : "vote-status"
-                      }
-                    >
-                      {track.archived
-                        ? "Retirada por el DJ · Voto utilizado"
-                        : "✓ Voto registrado"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+              <span>
+                Ver tus votos <span aria-hidden="true">⌄</span>
+              </span>
+            </summary>
+            <section aria-label="Tus votos">
+              <p className="hint">
+                Los votos son permanentes y no se pueden recuperar.
+              </p>
+              {p.votes.length === 0 ? (
+                <p className="hint">Tus canciones elegidas aparecerán aquí.</p>
+              ) : (
+                <ul className="my-votes-list">
+                  {p.votedTracks.map((track) => (
+                    <li key={track.id}>
+                      <div>
+                        <strong>{track.title}</strong>
+                        <span>{track.artist}</span>
+                      </div>
+                      <span
+                        className={
+                          track.archived ? "vote-status removed" : "vote-status"
+                        }
+                      >
+                        {track.archived
+                          ? "Retirada por el DJ · Voto utilizado"
+                          : "✓ Voto registrado"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </details>
+          <label className="search-label" htmlFor="guest-search">
+            Busca una canción o artista
+          </label>
           <label className="search">
-            <span>⌕</span>
+            <span aria-hidden="true">⌕</span>
             <input
+              id="guest-search"
               maxLength={100}
               aria-label="Buscar canción o artista"
               placeholder="Busca una canción o artista…"
@@ -351,7 +339,7 @@ export function Guest() {
           </label>
           <section>
             <div className="section-title">
-              <h2>{q ? "Resultados" : "Lo que quiere la pista"}</h2>
+              <h2>{q ? "Resultados" : "Ranking de canciones"}</h2>
               <span>{active.length} CANCIONES</span>
             </div>
             {q && local.length > 0 && (
@@ -373,6 +361,7 @@ export function Guest() {
               <TrackRow
                 key={track.id}
                 {...{ track, index }}
+                ranked={!q}
                 voted={p.votes.includes(track.id)}
                 disabled={
                   !connected ||
@@ -510,6 +499,6 @@ export function Guest() {
           </button>
         </div>
       )}
-    </>
+    </div>
   );
 }

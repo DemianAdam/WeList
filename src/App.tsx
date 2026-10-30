@@ -22,7 +22,6 @@ function Layout() {
           <span className={"live " + (!connected ? "offline" : "")}>
             {connected ? "● En vivo" : "● Reconectando"}
           </span>
-          <Link to="/dj-booth">Cabina DJ ↗</Link>
         </nav>
       </header>
       <main>
