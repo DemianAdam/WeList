@@ -169,6 +169,11 @@ export function createGuestSession(options: {
             }
             delay = Math.max(1, result.retryAfterMs) + random() * 250;
           } catch (error) {
+            if (applicationCode(error) === "SESSION_EXPIRED") {
+              storage.removeItem(pendingKey);
+              options.onExpire?.();
+              throw expired();
+            }
             if (
               !active ||
               disposed ||

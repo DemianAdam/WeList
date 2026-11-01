@@ -1,26 +1,35 @@
+import type { Result } from "../../convex/contracts/results";
+import type { FunctionReference } from "convex/server";
+import { api, internal } from "../../convex/_generated/api";
 import { test, expect } from "@playwright/test";
 import { ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
+function expectData<T>(result: Result<T, string>): T {
+  if (!result.ok) throw Error(result.error.code);
+  return result.data;
+}
 
 const url = process.env.WELIST_STAGING_URL;
 const key = process.env.WELIST_STAGING_DEPLOY_KEY;
-const ref = (name: string) => makeFunctionReference<any, any, any>(name);
 test.beforeEach(async () => {
   if (!url || !key || process.env.WELIST_STAGING_ACK !== "true")
     throw Error(
       "BLOCKED: set explicit staging URL, deploy key and WELIST_STAGING_ACK=true",
     );
   const client = new ConvexHttpClient(url);
-  if ((await client.query(ref("staging:enabled"), {})) !== true)
+  if ((await client.query(api.operations.staging.enabled, {})) !== true)
     throw Error("Staging flag is disabled");
-  const event = await client.query(ref("guest:current"), {});
+  const event = await client.query(api.events.queries.currentEvent, {});
   if (event?.name !== "Synthetic staging load test" || event.status !== "live")
     throw Error("Expected synthetic staging event");
   // The CLI-only admin method is present at runtime but omitted from public types.
   (
     client as ConvexHttpClient & { setAdminAuth: (key: string) => void }
   ).setAdminAuth(key);
-  await client.mutation(ref("staging:seed"), {});
+  await client.mutation(
+    internal.operations.staging
+      .seed as unknown as FunctionReference<"mutation">,
+    {},
+  );
 });
 
 test("a delayed registration response recovers without duplicating the vote budget", async ({
@@ -41,7 +50,7 @@ test("a delayed registration response recovers without duplicating the vote budg
         const frame = JSON.parse(String(message));
         if (
           frame.type === "Mutation" &&
-          frame.udfPath === "guest:registerSession"
+          frame.udfPath === api.sessions.mutations.registerSession
         ) {
           registrations++;
           const credential = frame.args?.[0]?.bootstrapToken;
@@ -159,13 +168,13 @@ test("independent guests share votes, reconnect and preserve their budgets", asy
       await expect(page.getByText("Te quedan 2 de 3 votos")).toBeVisible();
     }
     const client = new ConvexHttpClient(url!);
-    const event = await client.query(ref("guest:current"), {});
+    const event = await client.query(api.events.queries.currentEvent, {});
     await expect
       .poll(
         async () =>
           (
-            await client.query(ref("guest:leaderboard"), {
-              eventId: event._id,
+            await client.query(api.requests.queries.leaderboard, {
+              eventId: event!._id,
               limit: 50,
             })
           )[0]?.votes,
@@ -182,8 +191,8 @@ test("independent guests share votes, reconnect and preserve their budgets", asy
     ).toContainText("1");
     await b.reload();
     await expect(b.getByText("Te quedan 2 de 3 votos")).toBeVisible();
-    const rows = await client.query(ref("guest:leaderboard"), {
-      eventId: event._id,
+    const rows = await client.query(api.requests.queries.leaderboard, {
+      eventId: event!._id,
       limit: 50,
     });
     expect(
@@ -203,23 +212,25 @@ test("real DJ login, session restoration, moderation, logout and event lifecycle
     "BLOCKED: isolated staging DJ password unavailable",
   );
   const client = new ConvexHttpClient(url!);
-  const event = await client.query(ref("guest:current"), {});
-  const token = await client.mutation(ref("guest:issueSession"), {});
+  const event = await client.query(api.events.queries.currentEvent, {});
+  const token = expectData(
+    await client.mutation(api.sessions.mutations.issueSession, {}),
+  ).token;
   for (const extra of [{ profile: 0, confirm: false }, { confirm: true }])
     expect(
-      await client.mutation(ref("guest:gate"), {
+      await client.mutation(api.participation.mutations.updateGate, {
         token,
-        eventId: event._id,
+        eventId: event!._id,
         ...extra,
       }),
-    ).toBe("OK");
+    ).toMatchObject({ ok: true });
   expect(
-    await client.mutation(ref("guest:requestOrVote"), {
+    await client.mutation(api.requests.mutations.requestOrVote, {
       token,
-      eventId: event._id,
+      eventId: event!._id,
       trackId: "staging-song-0",
     }),
-  ).toBe("OK");
+  ).toMatchObject({ ok: true });
   await page.goto("/dj-booth");
   await page
     .getByLabel("Contraseña", { exact: true })

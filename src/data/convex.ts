@@ -1,5 +1,10 @@
+import type { Result } from "../../convex/contracts/results";
+import type { SearchResult as BackendSearchResult } from "../../convex/contracts/music";
+import type { RegisterSessionResult } from "../../convex/contracts/commands";
+import type { Id } from "../../convex/_generated/dataModel";
+import type { FunctionReference } from "convex/server";
+import { api } from "../../convex/_generated/api";
 import { ConvexClient, ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
 import type {
   Adapter,
   Command,
@@ -56,8 +61,18 @@ export function createConvexAdapter(
   let expirationVersion = 0;
   const guest = createGuestSession({
     url,
-    register: (args) =>
-      client.mutation(makeFunctionReference("guest:registerSession"), args),
+    register: async (args) => {
+      const result: RegisterSessionResult = await client.mutation(
+        api.sessions.mutations.registerSession,
+        args,
+      );
+      return result.ok
+        ? { status: "OK", reused: result.data.reused }
+        : {
+            status: result.error.code,
+            retryAfterMs: result.error.retryAfterMs ?? 1,
+          };
+    },
     onExpire: () => {
       token = "";
       snapshot = {
@@ -97,8 +112,27 @@ export function createConvexAdapter(
   const listeners = new Set<() => void>();
   let children: (() => void)[] = [];
   const emit = () => listeners.forEach((fn) => fn());
-  const mutation = (name: string, args: Record<string, unknown>) =>
-    client.mutation(makeFunctionReference<"mutation">(name), args);
+  const mutation = (
+    name: FunctionReference<"mutation">,
+    args: Record<string, unknown>,
+  ): Promise<Result<unknown, string>> => client.mutation(name, args);
+  async function adminMutation(
+    name: FunctionReference<"mutation">,
+    args: Record<string, unknown>,
+  ) {
+    try {
+      const result = await mutation(name, args);
+      if (!result.ok)
+        throw new CommandError(
+          result.error.code,
+          messages[result.error.code] ?? result.error.code,
+        );
+    } catch (error) {
+      const code = applicationCode(error);
+      if (code) throw new CommandError(code, messages[code] ?? code);
+      throw error;
+    }
+  }
   function guestError(error: unknown, usedToken: string) {
     const code = applicationCode(error);
     if (code === "SESSION_EXPIRED") guest.invalidate(usedToken);
@@ -106,16 +140,19 @@ export function createConvexAdapter(
       ? new CommandError(code, messages[code])
       : new Error("No pudimos conectar. Vuelve a intentarlo.");
   }
-  async function guestAction(name: string, args: Record<string, unknown>) {
+  async function guestAction(
+    name: FunctionReference<"action">,
+    args: Record<string, unknown>,
+  ): Promise<BackendSearchResult> {
     try {
-      return await client.action(makeFunctionReference(name), args);
+      return await client.action(name, args);
     } catch (error) {
       throw guestError(error, String(args.token ?? ""));
     }
   }
   type RawTrack = {
     trackId: string;
-    _id: string;
+    _id?: string;
     title: string;
     artist: string;
     votes?: number;
@@ -141,7 +178,7 @@ export function createConvexAdapter(
     if (eventId && !admin)
       children.push(
         client.onUpdate(
-          makeFunctionReference<"query">("guest:leaderboard"),
+          api.requests.queries.leaderboard,
           { eventId, limit: visibleLimit },
           (rows: any[]) => {
             if (snapshot.event) {
@@ -158,7 +195,7 @@ export function createConvexAdapter(
       const watchedToken = token;
       children.push(
         client.onUpdate(
-          makeFunctionReference<"query">("guest:participation"),
+          api.participation.queries.participation,
           { eventId, token: watchedToken },
           (p: any) => {
             snapshot = {
@@ -180,7 +217,7 @@ export function createConvexAdapter(
     if (authenticated)
       children.push(
         client.onUpdate(
-          makeFunctionReference<"query">("admin:providerStatus"),
+          api.music.spotify.queries.providerStatus,
           {},
           (status: Snapshot["providerQuota"]) => {
             snapshot = { ...snapshot, providerQuota: status };
@@ -195,7 +232,7 @@ export function createConvexAdapter(
     if (authenticated)
       children.push(
         client.onUpdate(
-          makeFunctionReference<"query">("admin:dashboard"),
+          api.events.queries.dashboard,
           {},
           (data: any) => {
             const newlyAuthorized = !admin;
@@ -238,7 +275,7 @@ export function createConvexAdapter(
       );
   }
   const unsubscribe = client.onUpdate(
-    makeFunctionReference<"query">("guest:current"),
+    api.events.queries.currentEvent,
     {},
     (e: any) => {
       const changed = (e?._id ?? "") !== eventId;
@@ -291,24 +328,26 @@ export function createConvexAdapter(
       return "Sesión cerrada.";
     }
     if (c.kind === "start") {
-      await mutation("admin:start", {
+      await adminMutation(api.events.mutations.startEvent, {
         name: c.name,
         profiles: c.profiles,
       });
       return "Evento iniciado.";
     }
     if (c.kind === "retryProvider") {
-      await mutation("admin:retryProvider", {});
+      await adminMutation(api.music.spotify.mutations.retryProvider, {});
       return "Se comprobará Spotify en la próxima búsqueda.";
     }
     if (c.kind === "end") {
-      await mutation("admin:end", { eventId: c.eventId });
+      await adminMutation(api.events.mutations.endEvent, {
+        eventId: c.eventId,
+      });
       return "Evento terminado.";
     }
     if (c.kind === "archive") {
       const request = snapshot.event?.tracks.find((t) => t.id === c.trackId);
       if (!request?.requestId) throw Error("Canción no encontrada.");
-      await mutation("admin:archive", {
+      await adminMutation(api.requests.mutations.setArchived, {
         eventId: c.eventId,
         requestId: request.requestId,
         undo: c.undo,
@@ -319,7 +358,9 @@ export function createConvexAdapter(
     let result;
     try {
       result = await mutation(
-        c.kind === "gate" ? "guest:gate" : "guest:requestOrVote",
+        c.kind === "gate"
+          ? api.participation.mutations.updateGate
+          : api.requests.mutations.requestOrVote,
         c.kind === "gate"
           ? {
               token,
@@ -332,8 +373,11 @@ export function createConvexAdapter(
     } catch (error) {
       throw guestError(error, token);
     }
-    if (result !== "OK")
-      throw new CommandError(result, messages[result] || result);
+    if (!result.ok)
+      throw new CommandError(
+        result.error.code,
+        messages[result.error.code] || result.error.code,
+      );
     return c.kind === "vote" ? "¡Tu voto ya cuenta!" : "Listo.";
   }
   return {
@@ -350,8 +394,8 @@ export function createConvexAdapter(
       const checkedToken = token;
       try {
         participation = await new ConvexHttpClient(url).query(
-          makeFunctionReference<"query">("guest:participation"),
-          { eventId, token: checkedToken },
+          api.participation.queries.participation,
+          { eventId: eventId as Id<"events">, token: checkedToken },
         );
       } catch (error) {
         throw guestError(error, checkedToken);
@@ -363,15 +407,17 @@ export function createConvexAdapter(
     },
     localSearch: async (eventId, term) => {
       await ensureGuest();
-      const result = await guestAction("services:localSearch", {
+      const result = await guestAction(api.music.search.actions.localSearch, {
         token,
         eventId,
         term,
       });
       return {
-        tracks: (result.tracks ?? []).map(track),
-        error: result.error
-          ? messages[result.error] || "Error de búsqueda."
+        tracks: (result.ok ? result.data.tracks : []).map(track),
+        error: (!result.ok ? result.error.code : result.data.warning?.code)
+          ? messages[
+              !result.ok ? result.error.code : result.data.warning!.code
+            ] || "Error de búsqueda."
           : undefined,
       };
     },
@@ -406,16 +452,18 @@ export function createConvexAdapter(
     },
     search: async (eventId, term, force = false) => {
       await ensureGuest();
-      const result = await guestAction("services:search", {
+      const result = await guestAction(api.music.search.actions.search, {
         token,
         eventId,
         term,
         force,
       });
       return {
-        tracks: (result.tracks ?? []).map(track),
-        error: result.error
-          ? messages[result.error] || "Error de búsqueda."
+        tracks: (result.ok ? result.data.tracks : []).map(track),
+        error: (!result.ok ? result.error.code : result.data.warning?.code)
+          ? messages[
+              !result.ok ? result.error.code : result.data.warning!.code
+            ] || "Error de búsqueda."
           : undefined,
       };
     },

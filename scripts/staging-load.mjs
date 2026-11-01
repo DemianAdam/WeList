@@ -1,5 +1,5 @@
+import { api, internal } from "../convex/_generated/api.js";
 import { ConvexClient, ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
 import { mkdir, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
@@ -50,7 +50,6 @@ if (
   )
 )
   throw Error("Unknown scenario");
-const ref = (name) => makeFunctionReference(name);
 let revision = "unknown";
 try {
   revision = execFileSync("git", ["rev-parse", "HEAD"], {
@@ -74,7 +73,7 @@ const save = () => writeFile(reportPath, JSON.stringify(report, null, 2));
 let http,
   admin,
   verified = false;
-const query = (name, args = {}) => bounded(() => http.query(ref(name), args));
+const query = (name, args = {}) => bounded(() => http.query(name, args));
 const activeClients = new Set();
 
 async function run(scenario, repeat) {
@@ -100,10 +99,15 @@ async function run(scenario, repeat) {
     unsubscribes = [];
   const checkpointDeliveries = [];
   try {
-    assertStaging(await query("staging:enabled"), await query("guest:current"));
-    const seeded = await bounded(() => admin.mutation(ref("staging:seed"), {}));
-    const event = await query("guest:current");
-    assertStaging(await query("staging:enabled"), event);
+    assertStaging(
+      await query(api.operations.staging.enabled),
+      await query(api.events.queries.currentEvent),
+    );
+    const seeded = await bounded(() =>
+      admin.mutation(internal.operations.staging.seed, {}),
+    );
+    const event = await query(api.events.queries.currentEvent);
+    assertStaging(await query(api.operations.staging.enabled), event);
     if (event._id !== seeded.eventId) throw Error("Event changed during setup");
     result.eventId = event._id;
     const issue = async (ordinal) => {
@@ -118,23 +122,25 @@ async function run(scenario, repeat) {
           "session",
           async () => {
             const value = await http.mutation(
-              ref("guest:issueSession"),
+              api.sessions.mutations.issueSession,
               {},
               { skipQueue: true },
             );
-            if (typeof value !== "string" || value === "RATE_LIMITED")
-              throw Object.assign(Error("Session rejected"), { data: value });
-            return value;
+            if (!value.ok)
+              throw Object.assign(Error("Session rejected"), {
+                data: value.error,
+              });
+            return value.data.token;
           },
           30000,
           { operationId: args.operationId, attempt: 1 },
         );
         const reused = await http.mutation(
-          ref("guest:registerSession"),
+          api.sessions.mutations.registerSession,
           { ...args, bootstrapToken: token },
           { skipQueue: true },
         );
-        if (reused.status !== "OK" || !reused.reused)
+        if (!reused.ok || !reused.data.reused)
           throw Error("Legacy identity incompatible");
       } else {
         const attempts = scenario === "recovery" ? 2 : 1;
@@ -149,19 +155,22 @@ async function run(scenario, repeat) {
                     expectedInjection: true,
                   });
                 const value = await http.mutation(
-                  ref("guest:registerSession"),
+                  api.sessions.mutations.registerSession,
                   args,
                   { skipQueue: true },
                 );
-                if (value.status !== "OK")
+                if (!value.ok)
                   throw Object.assign(Error("Registration rejected"), {
-                    data: value.status,
+                    data: value.error,
                   });
                 if (scenario === "recovery" && attempt === 1)
                   throw Object.assign(new TypeError("fetch failed"), {
                     expectedInjection: true,
                   });
-                if (scenario === "recovery" && value.reused !== ordinal < 10)
+                if (
+                  scenario === "recovery" &&
+                  value.data.reused !== ordinal < 10
+                )
                   throw Error("Unexpected recovery identity");
                 return value;
               },
@@ -201,7 +210,7 @@ async function run(scenario, repeat) {
         (r) => r.expectedInjection,
       ).length;
       const audit = await bounded(() =>
-        admin.query(ref("staging:auditSessions"), {
+        admin.query(internal.operations.staging.auditSessions, {
           hashes: tokens.map((t) =>
             createHash("sha256").update(t).digest("hex"),
           ),
@@ -232,7 +241,7 @@ async function run(scenario, repeat) {
       activeClients.add(client);
       for (const [name, args, update] of [
         [
-          "guest:current",
+          api.events.queries.currentEvent,
           {},
           (e) => {
             if (e?._id !== event._id || e.status !== "live")
@@ -240,12 +249,12 @@ async function run(scenario, repeat) {
           },
         ],
         [
-          "guest:participation",
+          api.participation.queries.participation,
           { token: tokens[i], eventId: event._id },
           () => {},
         ],
         [
-          "guest:leaderboard",
+          api.requests.queries.leaderboard,
           { eventId: event._id, limit: 50 },
           (rows) =>
             observeCheckpoints(
@@ -265,7 +274,7 @@ async function run(scenario, repeat) {
               new Promise((resolve, reject) => {
                 unsubscribes.push(
                   client.onUpdate(
-                    ref(name),
+                    name,
                     args,
                     (value) => {
                       update(value);
@@ -291,7 +300,10 @@ async function run(scenario, repeat) {
         for (const extra of [{ profile: 0, confirm: false }, { confirm: true }])
           await measure(result.records, "gate", async () =>
             requireOk(
-              await client.mutation(ref("guest:gate"), { ...args, ...extra }),
+              await client.mutation(api.participation.mutations.updateGate, {
+                ...args,
+                ...extra,
+              }),
             ),
           );
       }),
@@ -309,11 +321,14 @@ async function run(scenario, repeat) {
               i = ordinal % 100;
             return measure(result.records, "vote", async () =>
               requireOk(
-                await clients[i].mutation(ref("guest:requestOrVote"), {
-                  token: tokens[i],
-                  eventId: event._id,
-                  trackId: `staging-song-${(i + Math.floor(ordinal / 100)) % 10}`,
-                }),
+                await clients[i].mutation(
+                  api.requests.mutations.requestOrVote,
+                  {
+                    token: tokens[i],
+                    eventId: event._id,
+                    trackId: `staging-song-${(i + Math.floor(ordinal / 100)) % 10}`,
+                  },
+                ),
               ),
             );
           }),
@@ -333,15 +348,19 @@ async function run(scenario, repeat) {
       await Promise.allSettled(
         clients.map((client, i) =>
           measure(result.records, "cached-search", async () => {
-            const response = await client.action(ref("services:localSearch"), {
-              token: tokens[i],
-              eventId: event._id,
-              term: "synthetic",
-            });
+            const response = await client.action(
+              api.music.search.actions.localSearch,
+              {
+                token: tokens[i],
+                eventId: event._id,
+                term: "synthetic",
+              },
+            );
             if (
-              response.error ||
-              !Array.isArray(response.tracks) ||
-              !response.tracks.length
+              !response.ok ||
+              response.data.warning ||
+              !Array.isArray(response.data.tracks) ||
+              !response.data.tracks.length
             )
               throw Error("Cached search failed");
           }),
@@ -372,12 +391,15 @@ async function run(scenario, repeat) {
     } while (performance.now() < holdStart + holdMs);
     result.connectedElapsedMs = performance.now() - holdStart;
     result.finalVotes = (
-      await query("guest:leaderboard", { eventId: event._id, limit: 50 })
+      await query(api.requests.queries.leaderboard, {
+        eventId: event._id,
+        limit: 50,
+      })
     ).reduce((sum, row) => sum + row.votes, 0);
     await Promise.all(
       tokens.map((token) =>
         measure(result.records, "verify-participation", async () => {
-          const p = await query("guest:participation", {
+          const p = await query(api.participation.queries.participation, {
             token,
             eventId: event._id,
           });
@@ -437,7 +459,7 @@ async function disableFlag() {
       }),
       signal: AbortSignal.timeout(30000),
     });
-    if (!response.ok || (await query("staging:enabled")))
+    if (!response.ok || (await query(api.operations.staging.enabled)))
       throw Error("Cleanup failed");
     return "staging flag disabled and verified";
   } catch {
@@ -470,7 +492,10 @@ try {
   http = new ConvexHttpClient(url, { logger: false });
   admin = new ConvexHttpClient(url, { logger: false });
   admin.setAdminAuth(key);
-  assertStaging(await query("staging:enabled"), await query("guest:current"));
+  assertStaging(
+    await query(api.operations.staging.enabled),
+    await query(api.events.queries.currentEvent),
+  );
   verified = true;
   for (const scenario of scenarios)
     for (let repeat = 1; repeat <= repeats; repeat++) {

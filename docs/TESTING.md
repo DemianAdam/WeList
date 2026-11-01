@@ -34,7 +34,7 @@ Set these environment variables in the testing shell; tooling deliberately does 
 | `WELIST_STAGING_ACK`         | `true`, required for staging browsers and Spotify smoke             |
 | `WELIST_STAGING_DJ_PASSWORD` | Password for the provisioned DJ on that isolated deployment         |
 
-Deploy to the explicitly selected staging environment. Configure Convex Auth, provision its DJ account, set `WELIST_STAGING_LOAD_TEST=true` on staging, and invoke the internal `staging:seed` function with administrator credentials. The fixture refuses to replace a non-synthetic event. Never enable this flag on other deployments. Set staging Spotify client credentials on the backend if the live provider smoke is required; the synthetic load does not need them.
+Deploy to the explicitly selected staging environment. Configure Convex Auth, provision its DJ account, set `WELIST_STAGING_LOAD_TEST=true` on staging, and invoke the internal `operations/staging:seed` function with administrator credentials. The fixture refuses to replace a non-synthetic event. Never enable this flag on other deployments. Set staging Spotify client credentials on the backend if the live provider smoke is required; the synthetic load does not need them.
 
 Run sequentially against the same staging deployment:
 
@@ -89,3 +89,11 @@ The runner disables and verifies the staging flag on completion, failure after v
 ## Remaining manual checks
 
 Check physical iOS/Android Instagram switching, denied popups, return navigation and the hosted public QR on real devices. Local Vite testing does not validate CDN response headers or a publicly hosted frontend. Staging results describe the measured network/environment, not a production capacity guarantee.
+
+## Local suite organization
+
+Backend integration suites live in `tests/backend/`; `tests/support/backend.ts` owns emulator/component setup and event fixtures. Adapter/session/search-pipeline suites live in `tests/adapters/`. Run a focused suite with `npm test -- tests/backend/requests.test.ts`.
+
+`npm test` runs Vitest through `scripts/test.mjs`, with each run's temporary files under `node_modules/.cache/welist-tests/`. This avoids missing transformed SSR files in Windows sandbox temporary folders. The launcher forwards arguments and exit status and removes only its own temporary directory after completion.
+
+Use generated `api` and `internal` references in new tests and scripts. Staging scripts still require the existing explicit credentials, acknowledgment, and synthetic-event guards. Local checks do not deploy the new endpoints or establish cloud throughput.

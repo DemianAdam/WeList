@@ -15,14 +15,15 @@ Open the printed URL. Guests use `/`; the DJ uses `/dj-booth`. **Demo password: 
 
 ## Structure
 
-- `src/features/`: guest and DJ workflows.
-- `src/components/`: accessible dialog and reusable song row.
-- `src/data/`: adapter contract, browser mock, Convex adapter, React subscription provider.
-- `src/domain.ts`: demo catalog and pure voting rules.
-- `convex/`: schema, atomic guest operations, authorized administration, internal storage, Node actions, hourly cleanup.
-- `convex/auth.ts` and `convex/http.ts`: Convex Auth password provider and routes.
-- `tests/`: Convex integration tests and Playwright mobile flows.
-- `docs/SETUP.md`: credentials, deployment and production validation.
+- `convex/`: feature modules for sessions, events, participation, requests, music search, and Spotify; `schema.ts` composes their unchanged table definitions.
+- `convex/platform/`: shared authorization, hashing, and rate-limit helpers.
+- `convex/contracts/`: typed command results, search results, and business error codes.
+- `convex/operations/` and `convex/maintenance/`: provisioning, guarded staging fixtures, and cleanup.
+- `src/features/`: guest and DJ workflows; `src/data/` translates backend responses through the existing UI adapter contract.
+- `tests/backend/`, `tests/adapters/`, and `tests/support/`: feature integration tests, adapter tests, and reusable fixtures. Browser suites live in `tests/browser/` and `tests/staging/`.
+- `shared/`: browser/Node session diagnostics; `scripts/`: operational tools and the local test launcher.
+
+Read [the architecture guide](docs/ARCHITECTURE.md) for feature ownership, endpoint names, dependency rules, and transaction boundaries. See [setup](docs/SETUP.md) for credentials and deployment.
 
 The UI never directly changes Convex documents. Commands cross the adapter boundary; the backend validates sessions, event state, gate completion, and vote budgets. Mock authentication is deliberately not secure and is never used in Convex mode.
 

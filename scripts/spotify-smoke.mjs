@@ -1,5 +1,5 @@
+import { api } from "../convex/_generated/api.js";
 import { ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
 import { mkdir, writeFile } from "node:fs/promises";
 import { assertStaging, bounded, requireOk } from "./load-core.mjs";
 
@@ -9,7 +9,6 @@ const report = {
   checks: [],
 };
 await mkdir("test-results", { recursive: true });
-const ref = (name) => makeFunctionReference(name);
 try {
   const url = process.env.WELIST_STAGING_URL;
   if (!url || process.env.WELIST_STAGING_ACK !== "true")
@@ -18,27 +17,31 @@ try {
     );
   const client = new ConvexHttpClient(url);
   const call = (kind, name, args = {}) =>
-    bounded(() => client[kind](ref(name), args));
-  const event = await call("query", "guest:current");
-  assertStaging(await call("query", "staging:enabled"), event);
-  const tokens = await Promise.all(
-    [0, 1].map(() => call("mutation", "guest:issueSession")),
+    bounded(() => client[kind](name, args));
+  const event = await call("query", api.events.queries.currentEvent);
+  assertStaging(await call("query", api.operations.staging.enabled), event);
+  const sessions = await Promise.all(
+    [0, 1].map(() => call("mutation", api.sessions.mutations.issueSession)),
   );
-  if (tokens.some((token) => token === "RATE_LIMITED"))
+  if (sessions.some((result) => !result.ok))
     throw Error("Session issuance rate limited");
+  const tokens = sessions.map((result) => result.data.token);
   // At most two actual provider searches; never part of the synthetic load run.
   for (const term of [
     "Daft Punk One More Time",
     "The Weeknd Blinding Lights",
   ]) {
-    const response = await call("action", "services:search", {
+    const response = await call("action", api.music.search.actions.search, {
       token: tokens[0],
       eventId: event._id,
       term,
       force: true,
     });
-    if (response.error) throw Error(`Spotify smoke: ${response.error}`);
-    const track = response.tracks?.find(
+    if (!response.ok || response.data.warning)
+      throw Error(
+        `Spotify smoke: ${!response.ok ? response.error.code : response.data.warning.code}`,
+      );
+    const track = response.data.tracks?.find(
       (t) =>
         t.title &&
         t.artist &&
@@ -50,27 +53,30 @@ try {
       throw Error("Missing Spotify artwork");
     for (const extra of [{ profile: 0, confirm: false }, { confirm: true }])
       requireOk(
-        await call("mutation", "guest:gate", {
+        await call("mutation", api.participation.mutations.updateGate, {
           token: tokens[0],
           eventId: event._id,
           ...extra,
         }),
       );
     requireOk(
-      await call("mutation", "guest:requestOrVote", {
+      await call("mutation", api.requests.mutations.requestOrVote, {
         token: tokens[0],
         eventId: event._id,
         trackId: track.trackId,
       }),
     );
-    const shared = await call("action", "services:localSearch", {
+    const shared = await call("action", api.music.search.actions.localSearch, {
       token: tokens[1],
       eventId: event._id,
       term: track.title.slice(0, 100),
     });
     if (
-      shared.error ||
-      !shared.tracks.some((t) => t.trackId === track.trackId && t.votes === 1)
+      !shared.ok ||
+      shared.data.warning ||
+      !shared.data.tracks.some(
+        (t) => t.trackId === track.trackId && t.votes === 1,
+      )
     )
       throw Error("Another guest cannot reuse requested metadata");
     report.checks.push({
@@ -78,7 +84,7 @@ try {
       artwork: true,
       requested: true,
       shared: true,
-      source: response.source,
+      source: response.data.source,
     });
   }
   report.passed = true;

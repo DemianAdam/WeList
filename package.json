@@ -10,13 +10,13 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "typecheck": "tsc -b && tsc -p convex/tsconfig.json && tsc -p tsconfig.test.json",
-    "test": "vitest run",
+    "test": "node scripts/test.mjs",
     "test:e2e": "playwright test",
     "test:staging": "node scripts/staging-load.mjs",
     "test:e2e:staging": "playwright test --config=playwright.staging.config.ts",
     "test:spotify": "node scripts/spotify-smoke.mjs",
     "admin:setup": "node --env-file=.env.local scripts/admin-setup.mjs",
-    "format": "prettier --write src convex api tests docs *.json *.ts *.md"
+    "format": "prettier --write src convex shared scripts tests docs *.json *.ts *.md"
   },
   "dependencies": {
     "@auth/core": "^0.41.1",

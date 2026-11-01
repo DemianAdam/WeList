@@ -27,7 +27,7 @@ describe("load runner acceptance", () => {
     await measure(
       records,
       "session",
-      () => ({ status: "OK", reused: true }),
+      () => ({ ok: true, data: { reused: true } }),
       100,
       {
         operationId,
@@ -105,9 +105,13 @@ describe("load runner acceptance", () => {
   it("counts rejected mutation responses as failures, even after successful retries", async () => {
     const result = valid();
     await expect(
-      measure(result.records, "vote", () => requireOk("EXHAUSTED")),
+      measure(result.records, "vote", () =>
+        requireOk({ ok: false, error: { code: "EXHAUSTED" } }),
+      ),
     ).rejects.toThrow();
-    await measure(result.records, "vote", () => requireOk("OK"));
+    await measure(result.records, "vote", () =>
+      requireOk({ ok: true, data: null }),
+    );
     expect(evaluate(result)).toContain("Unexpected operation failures");
   });
   it("fails incorrect vote totals and missing observations", () => {

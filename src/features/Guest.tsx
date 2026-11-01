@@ -507,7 +507,7 @@ export function Guest() {
               </button>
             )}
             <small>
-              No verificamos si sigues los perfiles. Al continuar, se enviará tu
+             Al continuar, se enviará tu
               voto.
             </small>
           </Modal>

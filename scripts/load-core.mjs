@@ -77,7 +77,7 @@ export async function measure(
       kind,
       ok: true,
       ms: performance.now() - start,
-      ...diagnostic(value?.status === "OK" && value.reused ? "REUSED" : "OK"),
+      ...diagnostic(value?.ok && value.data?.reused ? "REUSED" : "OK"),
     });
     return value;
   } catch (error) {
@@ -97,8 +97,8 @@ export async function measure(
   }
 }
 export function requireOk(value) {
-  if (value !== "OK")
-    throw Object.assign(Error("Mutation rejected"), { data: value });
+  if (!value?.ok)
+    throw Object.assign(Error("Mutation rejected"), { data: value?.error });
   return value;
 }
 export function evaluate(result, { latencyMs = 2000, deliveryMs = 2000 } = {}) {

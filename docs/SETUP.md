@@ -2,7 +2,7 @@
 
 ## 1. Create the Convex project
 
-Run `npx convex dev` and create **WeList**. The CLI creates the deployment configuration and `_generated` bindings. The checked-in backend uses schema-derived builders in `convex/lib/server.ts`, so it can be typechecked and unit-tested before this step. Generated bindings can be adopted later without changing the adapter contract.
+Run `npx convex dev` and create **WeList**. The CLI creates the deployment configuration and `_generated` bindings. The backend uses the checked-in Convex-generated bindings in `convex/_generated/`. Run `npx convex codegen` after endpoint changes and commit the generated output. This refreshes local bindings without deploying the application. See [architecture](ARCHITECTURE.md) for module ownership and the coordinated endpoint migration.
 
 Use separate development and production deployments. Never commit `.env` files or secrets. `npm run typecheck` checks the backend independently of generated bindings.
 
@@ -63,7 +63,7 @@ Review current Spotify branding rules before publication, including official log
 
 For current commands, separate staging credentials, three repeated traffic scenarios, thresholds and cleanup, follow [TESTING.md](TESTING.md). The load command now requires `WELIST_STAGING_DEPLOY_KEY` as well as `WELIST_STAGING_URL`, reseeds each scenario, and disables the staging flag afterward.
 
-Use a separate disposable staging deployment. Deploy the code to staging, set `WELIST_STAGING_LOAD_TEST=true` **only on staging**, and call the internal `staging:seed` function using deployment administrator credentials. Follow the testing guide to run browser checks, provider smoke and the guarded load runner sequentially. The load runner tests 500 arrivals over a minute, a separate 500-request burst and 100 connected guests casting 300 votes, with three repeats of each scenario and explicit pass/fail thresholds. Never enable the guard on production or an existing personal development deployment. Staging data is synthetic; verify the flag is disabled after testing.
+Use a separate disposable staging deployment. Deploy the code to staging, set `WELIST_STAGING_LOAD_TEST=true` **only on staging**, and call the internal `operations/staging:seed` function using deployment administrator credentials. Follow the testing guide to run browser checks, provider smoke and the guarded load runner sequentially. The load runner tests 500 arrivals over a minute, a separate 500-request burst and 100 connected guests casting 300 votes, with three repeats of each scenario and explicit pass/fail thresholds. Never enable the guard on production or an existing personal development deployment. Staging data is synthetic; verify the flag is disabled after testing.
 
 - Test with iOS Safari and Android Chrome on actual phones, including Instagram installed/not installed, denied popups, and return navigation. No focus listener grants access.
 - Confirm your permanent QR resolves to the public origin, never localhost.
