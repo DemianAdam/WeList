@@ -3,13 +3,15 @@ import { anyApi } from "convex/server";
 import { describe, it, expect, vi } from "vitest";
 import schema from "../convex/schema";
 import { digest } from "../convex/lib/security";
+import rateLimiterTest from "@convex-dev/rate-limiter/test";
 // Marker supplies convex-test's module root without pretending codegen has run.
 const modules = {
-  ...import.meta.glob("../convex/**/*.ts"),
+  ...import.meta.glob(["../convex/**/*.ts", "!../convex/convex.config.ts"]),
   "../convex/_generated/test-root.ts": async () => ({}),
 };
 async function setup() {
   const t = convexTest(schema, modules);
+  rateLimiterTest.register(t);
   const userId = await t.run(async (ctx) => {
     const userId = await ctx.db.insert("users", {
       email: "admin@welist.local",
@@ -57,6 +59,78 @@ async function unlock(
   await t.mutation(anyApi.guest.gate, { token, eventId, confirm: true });
 }
 describe("transactional event rules", () => {
+  it("records one vote for simultaneous duplicate submissions by the same guest", async () => {
+    const { t, eventId } = await setup();
+    await unlock(t, eventId);
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        t.mutation(anyApi.guest.requestOrVote, {
+          token: "guest",
+          eventId,
+          trackId: "song0",
+        }),
+      ),
+    );
+    expect(results.sort()).toEqual([
+      "DUPLICATE",
+      "DUPLICATE",
+      "DUPLICATE",
+      "OK",
+    ]);
+    expect(
+      await t.query(anyApi.guest.participation, { token: "guest", eventId }),
+    ).toMatchObject({ used: 1, votes: ["song0"] });
+    expect(
+      await t.query(anyApi.guest.leaderboard, { eventId, limit: 50 }),
+    ).toMatchObject([{ votes: 1 }]);
+  });
+
+  it("rejects expired-session gate and participation access without changing votes", async () => {
+    const { t, eventId } = await setup();
+    await unlock(t, eventId);
+    await t.mutation(anyApi.guest.requestOrVote, {
+      token: "guest",
+      eventId,
+      trackId: "song0",
+    });
+    await t.run(async (ctx) => {
+      const s = await ctx.db
+        .query("sessions")
+        .withIndex("hash", (q) => q.eq("hash", digest("guest")))
+        .unique();
+      await ctx.db.patch(s!._id, { expiresAt: Date.now() - 1 });
+    });
+    await expect(
+      t.query(anyApi.guest.participation, { token: "guest", eventId }),
+    ).rejects.toThrow("SESSION_EXPIRED");
+    await expect(
+      t.mutation(anyApi.guest.gate, { token: "guest", eventId, confirm: true }),
+    ).rejects.toThrow("SESSION_EXPIRED");
+    expect(
+      await t.query(anyApi.guest.leaderboard, { eventId, limit: 50 }),
+    ).toMatchObject([{ votes: 1 }]);
+  });
+
+  it("denies every unauthenticated DJ write", async () => {
+    const { t, eventId } = await setup();
+    await unlock(t, eventId);
+    await t.mutation(anyApi.guest.requestOrVote, {
+      token: "guest",
+      eventId,
+      trackId: "song0",
+    });
+    const [row] = await t.query(anyApi.guest.leaderboard, {
+      eventId,
+      limit: 50,
+    });
+    for (const [fn, args] of [
+      [anyApi.admin.start, { name: "Attack", profiles: ["attacker"] }],
+      [anyApi.admin.archive, { eventId, requestId: row._id, undo: false }],
+      [anyApi.admin.retryProvider, {}],
+    ] as const)
+      await expect(t.mutation(fn, args)).rejects.toThrow("UNAUTHORIZED");
+    expect((await t.query(anyApi.guest.current, {}))!._id).toBe(eventId);
+  });
   it("allows one required Instagram profile and unlocks after that visit", async () => {
     const { t, admin, eventId } = await setup();
     await admin.mutation(anyApi.admin.end, { eventId });
@@ -587,6 +661,7 @@ it("provisions and reprovisions the DJ account while public signup is disabled",
 
 it("issues 500 guest sessions and enforces a configured ceiling", async () => {
   const t = convexTest(schema, modules);
+  rateLimiterTest.register(t);
   vi.stubEnv("GUEST_SESSIONS_PER_MINUTE", "1000");
   try {
     const tokens = [];
@@ -601,6 +676,7 @@ it("issues 500 guest sessions and enforces a configured ceiling", async () => {
     expect(new Set(tokens).size).toBe(500);
     vi.stubEnv("GUEST_SESSIONS_PER_MINUTE", "1");
     const limited = convexTest(schema, modules);
+    rateLimiterTest.register(limited);
     expect(await limited.mutation(anyApi.guest.issueSession, {})).not.toBe(
       "RATE_LIMITED",
     );
@@ -975,6 +1051,46 @@ it("preserves local cache results when provider expansion fails", async () => {
     expect(
       result.tracks.some((row: { trackId: string }) => row.trackId === "song0"),
     ).toBe(true);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
+});
+
+it("retains local songs after a provider timeout and permits a later search retry", async () => {
+  const { t, eventId } = await setup();
+  vi.stubEnv("SPOTIFY_CLIENT_ID", "test");
+  vi.stubEnv("SPOTIFY_CLIENT_SECRET", "test");
+  let timedOut = true;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes("accounts.spotify.com"))
+        return new Response(
+          JSON.stringify({ access_token: "access", expires_in: 3600 }),
+        );
+      if (timedOut) throw new DOMException("Request timed out", "TimeoutError");
+      return new Response(JSON.stringify({ tracks: { items: [] } }));
+    }),
+  );
+  try {
+    const first = await t.action(anyApi.services.search, {
+      token: "guest",
+      eventId,
+      term: "song 0",
+    });
+    expect(first).toMatchObject({
+      error: "SEARCH_UNAVAILABLE",
+      tracks: [{ trackId: "song0" }],
+    });
+    timedOut = false;
+    const retry = await t.action(anyApi.services.search, {
+      token: "guest",
+      eventId,
+      term: "song 0",
+    });
+    expect(retry.error).toBeUndefined();
+    expect(retry.tracks).toMatchObject([{ trackId: "song0" }]);
   } finally {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();

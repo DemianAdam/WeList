@@ -8,6 +8,8 @@ import type {
   Track,
 } from "./types";
 import { CommandError, emptyParticipation } from "./types";
+import { createGuestSession } from "./guestSession";
+import { applicationCode } from "../../shared/session-diagnostics.mjs";
 const messages: Record<string, string> = {
   OK: "¡Listo!",
   DUPLICATE: "Ya votaste esta canción.",
@@ -29,6 +31,7 @@ export function createConvexAdapter(
   connectedClient?: unknown,
 ): Adapter {
   const client: any = connectedClient ?? new ConvexClient(url);
+  let disposed = false;
   if (connectedClient && !client.onUpdate) {
     client.onUpdate = (
       query: unknown,
@@ -50,24 +53,35 @@ export function createConvexAdapter(
       return unsubscribe;
     };
   }
-  let token = localStorage.getItem("welist-token") || "";
+  let expirationVersion = 0;
+  const guest = createGuestSession({
+    url,
+    register: (args) =>
+      client.mutation(makeFunctionReference("guest:registerSession"), args),
+    onExpire: () => {
+      token = "";
+      snapshot = {
+        ...snapshot,
+        participation: emptyParticipation,
+        sessionExpired: ++expirationVersion,
+      };
+      emit();
+      queueMicrotask(watch);
+    },
+  });
+  let token = guest.getToken();
   let admin = false;
   let authenticated = false;
   let eventId = "";
   let visibleLimit = 50;
-  let issuing: Promise<void> | null = null;
   async function ensureGuest() {
-    if (token) return;
-    issuing ??= issueGuest()
-      .then((value) => {
-        token = value;
-        localStorage.setItem("welist-token", token);
-        watch();
-      })
-      .finally(() => {
-        issuing = null;
-      });
-    await issuing;
+    await guest.ensure();
+    if (token !== guest.getToken()) {
+      token = guest.getToken();
+      snapshot = { ...snapshot, sessionExpired: 0 };
+      watch();
+      emit();
+    }
   }
   let snapshot: Snapshot = {
     event: null,
@@ -85,11 +99,19 @@ export function createConvexAdapter(
   const emit = () => listeners.forEach((fn) => fn());
   const mutation = (name: string, args: Record<string, unknown>) =>
     client.mutation(makeFunctionReference<"mutation">(name), args);
-  async function issueGuest() {
-    const response = await mutation("guest:issueSession", {});
-    if (response === "RATE_LIMITED")
-      throw Error("Demasiados accesos. Espera un minuto.");
-    return response as string;
+  function guestError(error: unknown, usedToken: string) {
+    const code = applicationCode(error);
+    if (code === "SESSION_EXPIRED") guest.invalidate(usedToken);
+    return code && messages[code]
+      ? new CommandError(code, messages[code])
+      : new Error("No pudimos conectar. Vuelve a intentarlo.");
+  }
+  async function guestAction(name: string, args: Record<string, unknown>) {
+    try {
+      return await client.action(makeFunctionReference(name), args);
+    } catch (error) {
+      throw guestError(error, String(args.token ?? ""));
+    }
   }
   type RawTrack = {
     trackId: string;
@@ -113,6 +135,7 @@ export function createConvexAdapter(
     url: t.url,
   });
   function watch() {
+    if (disposed) return;
     children.forEach((fn) => fn());
     children = [];
     if (eventId && !admin)
@@ -131,11 +154,12 @@ export function createConvexAdapter(
           },
         ),
       );
-    if (token && eventId)
+    if (token && eventId) {
+      const watchedToken = token;
       children.push(
         client.onUpdate(
           makeFunctionReference<"query">("guest:participation"),
-          { eventId, token },
+          { eventId, token: watchedToken },
           (p: any) => {
             snapshot = {
               ...snapshot,
@@ -146,14 +170,13 @@ export function createConvexAdapter(
             };
             emit();
           },
-          () => {
-            localStorage.removeItem("welist-token");
-            token = "";
-            snapshot = { ...snapshot, participation: emptyParticipation };
-            emit();
+          (error: Error) => {
+            if (applicationCode(error) === "SESSION_EXPIRED")
+              guest.invalidate(watchedToken);
           },
         ),
       );
+    }
     if (authenticated)
       children.push(
         client.onUpdate(
@@ -307,10 +330,7 @@ export function createConvexAdapter(
           : { token, eventId: c.eventId, trackId: c.trackId },
       );
     } catch (error) {
-      const data = (error as { data?: unknown })?.data;
-      if (typeof data === "string" && messages[data])
-        throw new CommandError(data, messages[data]);
-      throw error;
+      throw guestError(error, token);
     }
     if (result !== "OK")
       throw new CommandError(result, messages[result] || result);
@@ -326,10 +346,16 @@ export function createConvexAdapter(
     getParticipation: async (eventId) => {
       if (!token)
         throw Error("No se pudo comprobar la sesión. Vuelve a intentarlo.");
-      const participation = await new ConvexHttpClient(url).query(
-        makeFunctionReference<"query">("guest:participation"),
-        { eventId, token },
-      );
+      let participation;
+      const checkedToken = token;
+      try {
+        participation = await new ConvexHttpClient(url).query(
+          makeFunctionReference<"query">("guest:participation"),
+          { eventId, token: checkedToken },
+        );
+      } catch (error) {
+        throw guestError(error, checkedToken);
+      }
       return {
         ...participation,
         votedTracks: (participation.votedTracks ?? []).map(track),
@@ -337,10 +363,11 @@ export function createConvexAdapter(
     },
     localSearch: async (eventId, term) => {
       await ensureGuest();
-      const result = await client.action(
-        makeFunctionReference<"action">("services:localSearch"),
-        { token, eventId, term },
-      );
+      const result = await guestAction("services:localSearch", {
+        token,
+        eventId,
+        term,
+      });
       return {
         tracks: (result.tracks ?? []).map(track),
         error: result.error
@@ -379,10 +406,12 @@ export function createConvexAdapter(
     },
     search: async (eventId, term, force = false) => {
       await ensureGuest();
-      const result = await client.action(
-        makeFunctionReference<"action">("services:search"),
-        { token, eventId, term, force },
-      );
+      const result = await guestAction("services:search", {
+        token,
+        eventId,
+        term,
+        force,
+      });
       return {
         tracks: (result.tracks ?? []).map(track),
         error: result.error
@@ -395,6 +424,9 @@ export function createConvexAdapter(
       watch();
     },
     dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      guest.dispose();
       unsubscribe();
       connection();
       children.forEach((fn) => fn());

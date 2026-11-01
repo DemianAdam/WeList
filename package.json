@@ -13,12 +13,15 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:staging": "node scripts/staging-load.mjs",
+    "test:e2e:staging": "playwright test --config=playwright.staging.config.ts",
+    "test:spotify": "node scripts/spotify-smoke.mjs",
     "admin:setup": "node --env-file=.env.local scripts/admin-setup.mjs",
     "format": "prettier --write src convex api tests docs *.json *.ts *.md"
   },
   "dependencies": {
     "@auth/core": "^0.41.1",
     "@convex-dev/auth": "^0.0.96",
+    "@convex-dev/rate-limiter": "0.4.3",
     "@noble/hashes": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "convex": "^1.48.0",

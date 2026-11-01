@@ -48,6 +48,7 @@ export type Snapshot = {
   metrics: Metrics | null;
   connected: boolean;
   loading: boolean;
+  sessionExpired?: number;
 };
 export const emptyParticipation: Participation = {
   clicks: [],

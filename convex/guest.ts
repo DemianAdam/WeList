@@ -1,6 +1,65 @@
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import { query, mutation } from "./lib/server";
 import { digest, session, live, rate } from "./lib/security";
+import { admitGuest, guestAdmissionConfig } from "./lib/guestAdmission";
+
+export const registerSession = mutation({
+  args: { bootstrapToken: v.string(), operationId: v.string() },
+  handler: async (ctx, { bootstrapToken, operationId }) => {
+    if (
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(
+        operationId,
+      )
+    )
+      throw new ConvexError("VALIDATION_ERROR");
+    const log = (outcome: string) =>
+      console.info(
+        JSON.stringify({ event: "guest_registration", operationId, outcome }),
+      );
+    if (!/^[a-f0-9]{64}$/.test(bootstrapToken)) {
+      log("VALIDATION_ERROR");
+      throw new ConvexError("VALIDATION_ERROR");
+    }
+    try {
+      guestAdmissionConfig();
+    } catch (error) {
+      log("CONFIGURATION_ERROR");
+      throw error;
+    }
+    const hash = digest(bootstrapToken);
+    const existing = await ctx.db
+      .query("sessions")
+      .withIndex("hash", (q) => q.eq("hash", hash))
+      .unique();
+    if (existing) {
+      if (existing.role !== "guest") {
+        log("VALIDATION_ERROR");
+        throw new ConvexError("VALIDATION_ERROR");
+      }
+      if (existing.expiresAt <= Date.now()) {
+        log("SESSION_EXPIRED");
+        return { status: "SESSION_EXPIRED" as const };
+      }
+      log("REUSED");
+      return { status: "OK" as const, reused: true };
+    }
+    const admission = await admitGuest(ctx);
+    if (!admission.ok) {
+      log("RATE_LIMITED");
+      return {
+        status: "RATE_LIMITED" as const,
+        retryAfterMs: admission.retryAfterMs,
+      };
+    }
+    await ctx.db.insert("sessions", {
+      hash,
+      role: "guest",
+      expiresAt: Date.now() + 30 * 86400000,
+    });
+    log("CREATED");
+    return { status: "OK" as const, reused: false };
+  },
+});
 
 export const issueSession = mutation({
   args: {},
@@ -8,17 +67,7 @@ export const issueSession = mutation({
     const token =
       crypto.randomUUID().replaceAll("-", "") +
       crypto.randomUUID().replaceAll("-", "");
-    const configured = Number(process.env.GUEST_SESSIONS_PER_MINUTE);
-    const ceiling =
-      Number.isSafeInteger(configured) && configured > 0 ? configured : 1000;
-    // Spread concurrent arrivals across independent counters while keeping the
-    // sum of their minute budgets at the configured global ceiling.
-    const shards = Math.min(32, ceiling);
-    const shard = Number.parseInt(token.slice(0, 8), 16) % shards;
-    const shardLimit =
-      Math.floor(ceiling / shards) + (shard < ceiling % shards ? 1 : 0);
-    if (!(await rate(ctx, "guest-session:" + shard, shardLimit)))
-      return "RATE_LIMITED";
+    if (!(await admitGuest(ctx)).ok) return "RATE_LIMITED";
     await ctx.db.insert("sessions", {
       hash: digest(token),
       role: "guest",

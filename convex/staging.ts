@@ -1,5 +1,27 @@
-import { internalMutation, query } from "./lib/server";
+import { internalMutation, internalQuery, query } from "./lib/server";
 import { anyApi } from "convex/server";
+import { v } from "convex/values";
+
+export const auditSessions = internalQuery({
+  args: { hashes: v.array(v.string()) },
+  handler: async (ctx, { hashes }) => {
+    if (process.env.WELIST_STAGING_LOAD_TEST !== "true" || hashes.length > 500)
+      throw Error("Staging audit disabled");
+    const rows = await Promise.all(
+      hashes.map((hash) =>
+        ctx.db
+          .query("sessions")
+          .withIndex("hash", (q) => q.eq("hash", hash))
+          .unique(),
+      ),
+    );
+    return {
+      sessions: rows.filter(Boolean).length,
+      distinctSessions: new Set(rows.filter(Boolean).map((row) => row!._id))
+        .size,
+    };
+  },
+});
 
 // Load-test entry points are disabled unless explicitly enabled on an isolated deployment.
 export const enabled = query({

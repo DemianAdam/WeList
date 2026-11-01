@@ -39,6 +39,10 @@ npm run test:e2e
 
 Backend tests use `convex-test`, without cloud credentials. This verifies transactional rules in an emulator, not cloud load or real network latency. Browser screenshots are written to `test-results/`.
 
+See [the testing guide](docs/TESTING.md) for real staging browser tests, the Spotify smoke check, repeatable traffic scenarios, acceptance thresholds and saved reports.
+
+Latest validation: [1 November 2026 session results](docs/TEST_RESULTS_2026-11-01.md). [October 30 results](docs/TEST_RESULTS_2026-10-30.md) remain available as historical evidence.
+
 ## Product rules
 
 One required Instagram profile visit, plus a second optional profile visit when configured, and explicit confirmation unlock an event. Follows are not verified. Guests spend three votes across three songs for the entire night; a new request spends a vote. Removed songs remain blocked and votes are never refunded. DJs may undo removal for ten seconds. Ending the event closes writes. A new event has new participation and budgets. Search shows matching requests and shared event-cache results first, expands automatically when fewer than five songs match, and offers “Buscar más canciones” for manual expansion. Completed events expire after 30 days.

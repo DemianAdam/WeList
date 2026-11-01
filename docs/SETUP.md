@@ -18,14 +18,18 @@ For password recovery, rerun the same command against the intended deployment. I
 
 In the Convex dashboard, set:
 
-| Variable                      | Value                                            |
-| ----------------------------- | ------------------------------------------------ |
-| `SPOTIFY_CLIENT_ID`           | Spotify developer app client ID                  |
-| `SPOTIFY_CLIENT_SECRET`       | Spotify developer app client secret              |
-| `SPOTIFY_REQUESTS_PER_MINUTE` | Start at 120; tune to the granted provider quota |
-| `GUEST_SESSIONS_PER_MINUTE`   | Optional global ceiling; defaults to 1,000       |
+| Variable                       | Value                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------- |
+| `SPOTIFY_CLIENT_ID`            | Spotify developer app client ID                                           |
+| `SPOTIFY_CLIENT_SECRET`        | Spotify developer app client secret                                       |
+| `SPOTIFY_REQUESTS_PER_MINUTE`  | Start at 120; tune to the granted provider quota                          |
+| `GUEST_SESSIONS_PER_MINUTE`    | Token-bucket refill per minute; default 1,000                             |
+| `GUEST_SESSION_BURST_CAPACITY` | Maximum accumulated capacity; defaults to refill rate                     |
+| `GUEST_SESSION_LIMIT_SHARDS`   | Shards, default 64; positive integer at most 256, capped by rate/capacity |
 
-Spotify credentials must **never** have a `VITE_` prefix. They stay in Convex actions. Anonymous guest session tokens are issued by a Convex mutation and only their SHA-256 digests are stored. Convex Auth owns DJ sessions.
+Spotify credentials must **never** have a `VITE_` prefix. They stay in Convex actions. New browsers generate a cryptographically random 256-bit anonymous credential and register it with Convex; only its SHA-256 digest is stored on the backend. Pending registration survives reloads and retries with the same credential, without extending expiry or spending additional capacity when reused. The legacy server-issued-token endpoint remains compatible and shares the same admission bucket. Convex Auth owns DJ sessions.
+
+Admission settings must be positive integers; malformed explicit values fail closed with `CONFIGURATION_ERROR`. Token-bucket capacity accumulates during quiet periods and refills continuously: this is intentionally not a strict calendar-minute ceiling. Install dependencies and deploy the backend/component before the new frontend. Existing sessions and vote budgets remain valid. A frontend rollback can keep using the legacy endpoint. Old guest-session counters are unused and expire through the existing cleanup job.
 
 ## 3. Configure Vercel
 
@@ -57,7 +61,9 @@ Review current Spotify branding rules before publication, including official log
 
 ## 5. Pilot validation
 
-Use a separate disposable staging deployment. Deploy the code to staging, set `WELIST_STAGING_LOAD_TEST=true` **only on staging**, and call the internal `staging:seed` function using deployment administrator credentials. Set `WELIST_STAGING_URL` to that deployment URL and run `npm run test:staging -- --i-understand-staging`. The script refuses to run without the server-side staging guard and a synthetic event. It sends 500 session requests in 20 waves of 25, then exercises 100 WebSocket clients attempting 20 votes per second. It prints failures and mutation and subscription latency percentiles. Never enable this guard on production or an existing personal development deployment. Staging data is synthetic; disable the flag after testing.
+For current commands, separate staging credentials, three repeated traffic scenarios, thresholds and cleanup, follow [TESTING.md](TESTING.md). The load command now requires `WELIST_STAGING_DEPLOY_KEY` as well as `WELIST_STAGING_URL`, reseeds each scenario, and disables the staging flag afterward.
+
+Use a separate disposable staging deployment. Deploy the code to staging, set `WELIST_STAGING_LOAD_TEST=true` **only on staging**, and call the internal `staging:seed` function using deployment administrator credentials. Follow the testing guide to run browser checks, provider smoke and the guarded load runner sequentially. The load runner tests 500 arrivals over a minute, a separate 500-request burst and 100 connected guests casting 300 votes, with three repeats of each scenario and explicit pass/fail thresholds. Never enable the guard on production or an existing personal development deployment. Staging data is synthetic; verify the flag is disabled after testing.
 
 - Test with iOS Safari and Android Chrome on actual phones, including Instagram installed/not installed, denied popups, and return navigation. No focus listener grants access.
 - Confirm your permanent QR resolves to the public origin, never localhost.
@@ -72,6 +78,6 @@ Use a separate disposable staging deployment. Deploy the code to staging, set `W
 
 An hourly cron removes ended-event data older than 30 days in bounded batches and cleans expired sessions, cached metadata and rate-limit windows. Large datasets may take several cron runs to drain. Active events are not automatically ended. The pilot leaderboard has a 1,000-row safety bound; revisit pagination before events with larger request volumes. Search matches use case-insensitive substrings; recording-level deduplication is not implemented.
 
-Guest-session issuance divides the configurable per-minute ceiling across up to 32 counters to reduce write conflicts during arrivals. Uneven traffic can fill an individual counter before the aggregate ceiling is reached; measure real traffic and adjust capacity if necessary.
+Guest-session admission uses `@convex-dev/rate-limiter` with synchronous transactional consumption and configurable sharding. The default is a 1,000-credit capacity, a 1,000/minute refill, and 64 shards. Successful reuse of an existing credential skips admission entirely. More shards or a maintained component alone do not establish throughput; use the measured results and acceptance thresholds before release.
 
 This pilot has no payments, playback integration, user accounts, verified follow checks, or multi-venue tenancy.

@@ -43,6 +43,7 @@ export function Guest() {
     connected,
     loading,
     loadMore,
+    sessionExpired,
   } = useData();
   const [query, setQuery] = useState("");
   const [expandedSearch, setExpandedSearch] = useState("");
@@ -69,6 +70,7 @@ export function Guest() {
     }
   }
   const [message, setMessage] = useState("");
+  const handledExpiration = useRef(0);
   const [busy, setBusy] = useState("");
 
   const [limit, setLimit] = useState(50);
@@ -101,13 +103,20 @@ export function Guest() {
     }
   }, [id]);
   useEffect(() => {
+    if (sessionExpired && handledExpiration.current !== sessionExpired) {
+      handledExpiration.current = sessionExpired;
+      savePending(null);
+      setGateError("");
+      setMessage("Tu sesión venció. Vuelve a participar.");
+      return;
+    }
     if (loading || !pending) return;
     if (!event?.live || pending.eventId !== event.id) {
       savePending(null);
       setGateError("");
       setMessage("El evento terminó o cambió. Tu voto pendiente se canceló.");
     }
-  }, [loading, event?.id, event?.live, pending]);
+  }, [loading, event?.id, event?.live, pending, sessionExpired]);
   useEffect(() => {
     if (
       pending &&
@@ -359,7 +368,6 @@ export function Guest() {
           <section>
             <div className="section-title">
               <h2>{q ? "Resultados" : "Ranking de canciones"}</h2>
-              <span>{active.length} CANCIONES</span>
             </div>
             {q && local.length > 0 && (
               <p className="hint">Ya está en la pista · Suma tu voto</p>

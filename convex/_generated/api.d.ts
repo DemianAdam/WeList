@@ -15,10 +15,12 @@ import type * as crons from "../crons.js";
 import type * as guest from "../guest.js";
 import type * as http from "../http.js";
 import type * as internal_ from "../internal.js";
+import type * as lib_guestAdmission from "../lib/guestAdmission.js";
 import type * as lib_security from "../lib/security.js";
 import type * as lib_server from "../lib/server.js";
 import type * as provision from "../provision.js";
 import type * as services from "../services.js";
+import type * as staging from "../staging.js";
 
 import type {
   ApiFromModules,
@@ -34,10 +36,12 @@ declare const fullApi: ApiFromModules<{
   guest: typeof guest;
   http: typeof http;
   internal: typeof internal_;
+  "lib/guestAdmission": typeof lib_guestAdmission;
   "lib/security": typeof lib_security;
   "lib/server": typeof lib_server;
   provision: typeof provision;
   services: typeof services;
+  staging: typeof staging;
 }>;
 
 /**
@@ -66,4 +70,6 @@ export declare const internal: FilterApi<
   FunctionReference<any, "internal">
 >;
 
-export declare const components: {};
+export declare const components: {
+  rateLimiter: import("@convex-dev/rate-limiter/_generated/component.js").ComponentApi<"rateLimiter">;
+};

@@ -13,6 +13,7 @@ test("one-profile event can retry a failed Instagram visit", async ({
   await page.getByLabel("Perfil de Instagram 1").fill("solo_dj");
   await page.getByRole("button", { name: "Revisar evento" }).click();
   await page.getByRole("button", { name: "Iniciar evento" }).click();
+  await expect(page.getByText("One profile", { exact: true })).toBeVisible();
   await page.goto("/");
   await page.getByLabel("Buscar canción o artista").fill("Midnight");
   await page.getByRole("button", { name: "Votar Midnight City" }).click();
