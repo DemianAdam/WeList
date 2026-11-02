@@ -4,11 +4,11 @@
 
 Run `npx convex dev` and create **WeList**. The CLI creates the deployment configuration and `_generated` bindings. The backend uses the checked-in Convex-generated bindings in `convex/_generated/`. Run `npx convex codegen` after endpoint changes and commit the generated output. This refreshes local bindings without deploying the application. See [architecture](ARCHITECTURE.md) for module ownership and the coordinated endpoint migration.
 
-Use separate development and production deployments. Never commit `.env` files or secrets. `npm run typecheck` checks the backend independently of generated bindings.
+Use a fresh production deployment and a separate disposable staging deployment; do not use the existing personal development deployment for staging. Never commit `.env` files or secrets. `npm run typecheck` checks the backend independently of generated bindings.
 
 ## 2. Configure Convex Auth and server secrets
 
-Share the direct URL `https://<your-domain>/dj-booth` with the DJ and ask them to bookmark it. The guest page does not link to the booth; the URL itself is not a security credential.
+Share the direct URL `https://app.welist.com.ar/dj-booth` with the DJ and ask them to bookmark it. The guest page does not link to the booth; the URL itself is not a security credential.
 
 WeList uses Convex Auth for the single DJ account `admin@welist.local`. Public signup is disabled. Deploy the backend first, configure Convex Auth's `JWT_PRIVATE_KEY`, `JWKS`, and `SITE_URL` for the deployment (see https://labs.convex.dev/auth/setup), and explicitly provision the DJ. An existing account has no DJ rights until this is done.
 
@@ -31,17 +31,26 @@ Spotify credentials must **never** have a `VITE_` prefix. They stay in Convex ac
 
 Admission settings must be positive integers; malformed explicit values fail closed with `CONFIGURATION_ERROR`. Token-bucket capacity accumulates during quiet periods and refills continuously: this is intentionally not a strict calendar-minute ceiling. Install dependencies and deploy the backend/component before the new frontend. Existing sessions and vote budgets remain valid. A frontend rollback can keep using the legacy endpoint. Old guest-session counters are unused and expire through the existing cleanup job.
 
-## 3. Configure Vercel
+## 3. Configure Cloudflare Pages
 
-Import the repository as **WeList**, framework Vite, build command `npm run build`, output `dist`. Set the following for each deployment environment:
+Create a Pages project using the GitHub repository, with production branch `main`, build command `npm run build`, build output `dist`, and Node 22 or newer (set `NODE_VERSION` in both environments). Pages deploys pushes to `main` to production and can build other branches as previews. The existing `vercel.json` remains available for Vercel; Pages uses `public/_headers` for equivalent security headers and its default SPA fallback for `/dj-booth`.
 
-| Variable          | Value                                         |
-| ----------------- | --------------------------------------------- |
-| `VITE_DATA_MODE`  | `convex`                                      |
-| `VITE_CONVEX_URL` | Corresponding Convex `.convex.cloud` URL      |
-| `VITE_PUBLIC_URL` | Permanent venue HTTPS origin used in QR codes |
+Attach `app.welist.com.ar` in Pages' custom domains settings and follow the displayed DNS instructions at the domain's DNS provider. Confirm HTTPS is active before sharing the address. For a subdomain, Cloudflare documents a CNAME to the Pages project; use the exact target shown by the dashboard. See [custom domains](https://developers.cloudflare.com/pages/configuration/custom-domains/).
 
-Deploy the backend with `npx convex deploy` for production. Then deploy the frontend. `vercel.json` provides SPA fallback and response security headers.
+Configure build variables separately for production and preview, then trigger fresh builds:
+
+| Variable | Production | Preview |
+| --- | --- | --- |
+| `NODE_VERSION` | `22` | `22` |
+| `VITE_DATA_MODE` | `convex` | `convex` |
+| `VITE_CONVEX_URL` | Fresh production `.convex.cloud` URL | Disposable staging `.convex.cloud` URL; never production |
+| `VITE_PUBLIC_URL` | `https://app.welist.com.ar` | Omit so each preview QR uses its own origin |
+
+Set production Convex Auth `SITE_URL` to `https://app.welist.com.ar`. Set the staging deployment's `SITE_URL` to its stable staging origin, not production. Use a stable staging branch URL if authentication requires a fixed origin, and verify login there. Configure distinct Auth keys, Spotify credentials, and DJ passwords for each deployment. `VITE_` values are public build-time configuration; backend credentials must only be set in Convex.
+
+Deploy the backend to the selected staging deployment first and verify the preview uses that exact deployment. Deploy the backend to the fresh production deployment with `npx convex deploy` after checking the selected Convex project, then publish the production frontend. Never point a preview at production, even temporarily. Verify both environments in the Pages settings after changes; a missing `VITE_DATA_MODE=convex` otherwise starts the local demo.
+
+For releases, deploy and validate backend changes on staging first, run the checks in [TESTING.md](TESTING.md), then deploy the matching production backend and frontend. Coordinate breaking backend/frontend changes as described in [ARCHITECTURE.md](ARCHITECTURE.md); roll them back together if necessary. Verify the QR destination, response headers and DJ login after release.
 
 Guest session creation and admin login go directly to Convex. Guest issuance is rate-limited globally; Convex Auth handles password hashing, sessions, and token refresh for the administrator.
 
